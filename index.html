@@ -15,7 +15,8 @@
     background:rgba(4,8,18,.66);backdrop-filter:blur(6px);z-index:20}
   .hidden{display:none!important}
   .panel{background:linear-gradient(160deg,#101a33,#0a1122);border:1px solid #2b3f6b;border-radius:18px;
-    padding:26px 38px 30px;box-shadow:0 24px 80px rgba(0,0,0,.65);text-align:center;max-width:620px;width:min(93vw,620px)}
+    padding:24px 36px 28px;box-shadow:0 24px 80px rgba(0,0,0,.65);text-align:center;max-width:640px;
+    width:min(93vw,640px);max-height:94vh;overflow-y:auto}
   .title{font-size:50px;font-weight:900;letter-spacing:8px;margin:2px 0 2px;
     background:linear-gradient(120deg,#ffd54a,#ff8a5c 45%,#6cd0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
   .subtitle{font-size:13px;letter-spacing:6px;color:#8ea6cf;margin-bottom:14px}
@@ -48,6 +49,14 @@
   .dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px;vertical-align:-1px;
     box-shadow:0 0 8px currentColor}
   #touch{display:none}
+  .diff.cnt{padding:7px 12px;font-size:13px}
+  #nameGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px 8px;margin:2px 0 10px}
+  .namecell{display:flex;align-items:center;gap:5px;background:#0d1730;border:1px solid #24365e;
+    border-radius:8px;padding:4px 7px}
+  .namecell.off{opacity:.32}
+  .namecell input{width:100%;min-width:0;background:transparent;border:none;outline:none;color:#e8f0ff;
+    font-size:13px;font-family:inherit;padding:2px 0}
+  .namecell .dot{margin:0;flex:none;width:10px;height:10px}
   .mobile-hint{display:none;margin-top:8px;font-size:12px;color:#7ec9a9;letter-spacing:1px}
   @media (pointer:coarse){ .mobile-hint{display:block} }
 </style>
@@ -92,6 +101,10 @@
       <button class="diff" data-ai="hard">困难</button>
       <button class="diff" data-ai="nightmare">噩梦</button>
     </div>
+    <div class="rowlbl">小球数量（1-10，颜色各不相同）</div>
+    <div class="diffrow" id="countRow"></div>
+    <div class="rowlbl">选手命名（点击方框输入，自动保存）</div>
+    <div id="nameGrid"></div>
     <button id="btnStart" class="btn">开始比赛 ▶</button>
     <div class="best" id="bestLabel">单人最佳（普通）：--:--.-</div>
     <div class="keys">
@@ -197,15 +210,30 @@ const GY = 560;                // 下坡加速度（更大=更沉）
 const DRAG = 1.05;             // 阻力（更大=更快落地、更不飘）
 const MAXV = 950;
 const GOLD='#ffd54a', CYAN='#6cd0ff';
-const PLAYER_STYLE = [{name:'你',color:GOLD},{name:'P1',color:GOLD},{name:'P2',color:CYAN}];
-const AI_DEFS = [
+const BALL_POOL=[                 // 10 个固定颜色槽位（各不相同），名字可自定义
+  {name:'你',   color:'#ffd54a'},
   {name:'赤焰', color:'#ff5d5d'},
   {name:'碧波', color:'#4da3ff'},
   {name:'紫电', color:'#b06cff'},
   {name:'翠影', color:'#52e0a0'},
   {name:'橙旋', color:'#ff9d3d'},
   {name:'白霜', color:'#dfe8ff'},
+  {name:'青岚', color:'#35d0e8'},
+  {name:'粉黛', color:'#ff7ac8'},
+  {name:'琥珀', color:'#cd8b45'},
 ];
+let ballCount=6;                                  // 小球数量 1-10
+let customNames=BALL_POOL.map(e=>e.name);
+function saveRoster(){try{localStorage.setItem('marbleRoster',JSON.stringify({c:ballCount,n:customNames}))}catch(e){}}
+function loadRoster(){
+  try{
+    const r=JSON.parse(localStorage.getItem('marbleRoster'));
+    if(r&&Array.isArray(r.n)){
+      ballCount=clamp(+r.c||6,1,10);
+      customNames=BALL_POOL.map((e,i)=>(typeof r.n[i]==='string'&&r.n[i].trim())?r.n[i].slice(0,6):e.name);
+    }
+  }catch(e){}
+}
 const LENGTHS = {               // 赛道长度（独立选项）
   short:  {label:'短道', len:17000},
   medium: {label:'中道', len:32000},
@@ -274,7 +302,7 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
       advanceScreen(s);
     }
-    if(e.code.startsWith('Digit')){ const n=+e.code.slice(5); if(n>=1&&n<=balls.length) setFollow(n-1,s); }
+    if(e.code.startsWith('Digit')){ let n=+e.code.slice(5); if(n===0)n=10; if(n>=1&&n<=balls.length) setFollow(n-1,s); }
   }
   let enterUsed=false;
   if(e.code==='Escape'){
@@ -537,38 +565,40 @@ function rotNearest(o,px,py){
 /* ================= 弹珠 ================= */
 function makeBalls(){
   const jr = mulberry32(seed ^ 0x5f3759df);
-  const skills = AILVLS[diffKey].ai.map(s=>clamp(s+(jr()-0.5)*0.04,0.40,0.99));
+  const n = mode==='2p' ? Math.max(2,ballCount) : Math.max(1,ballCount);
+  const roster = BALL_POOL.map((e,i)=>({name:customNames[i].trim()||e.name, color:e.color}));
   players=[];
   balls=[];
   if(mode==='spectate'){
-    // 全AI观赛：每颗都是高手
-    for(let i=0;i<6;i++){
-      const def=AI_DEFS[i], skill=0.93+jr()*0.06;
-      balls.push(mkBall(false,-1,def.name,def.color,skill,i,jr));
-    }
-    players = spectateSplit ? [balls[0],balls[3]] : [balls[0]];
+    for(let i=0;i<n;i++)
+      balls.push(mkBall(false,-1,roster[i].name,roster[i].color,0.93+jr()*0.06,i,n,jr));
+    players=[balls[0]];
     return balls;
   }
-  const pSlots = mode==='2p' ? [1,4] : [2];
+  const arr=AILVLS[diffKey].ai, lo=arr[0], hi=arr[arr.length-1];
+  const pSlots = mode==='2p'
+    ? [Math.round((n-1)*0.3), Math.round((n-1)*0.7)]
+    : [Math.floor((n-1)/2)];
+  const aiDefs = roster.slice(pSlots.length);      // 其余槽位做人机
   let ai=0;
-  for(let i=0;i<6;i++){
-    const pi=pSlots.indexOf(i);
-    const isP=pi>=0;
-    let name,color,skill;
-    if(isP){
-      const st=PLAYER_STYLE[mode==='2p'?(pi+1):0];
-      name=st.name; color=st.color; skill=1;
+  for(let i=0;i<n;i++){
+    const ps=pSlots.indexOf(i);
+    if(ps>=0){
+      balls.push(mkBall(true,ps,roster[ps].name,roster[ps].color,1,i,n,jr));
+      players.push(balls[balls.length-1]);
     }else{
-      const def=AI_DEFS[ai]; name=def.name; color=def.color; skill=skills[ai]; ai++;
+      const d=aiDefs[ai%aiDefs.length];
+      const t=n-pSlots.length>1 ? ai/(n-pSlots.length-1) : 0;
+      const skill=clamp(hi-(hi-lo)*t+(jr()-0.5)*0.04,0.40,0.99);   // 技术从最强铺到最弱
+      balls.push(mkBall(false,-1,d.name,d.color,skill,i,n,jr));
+      ai++;
     }
-    balls.push(mkBall(isP,isP?pi:-1,name,color,skill,i,jr));
-    if(isP) players.push(balls[balls.length-1]);
   }
   return balls;
 }
-function mkBall(isP,pi,name,color,skill,slot,jr){
+function mkBall(isP,pi,name,color,skill,slot,total,jr){
   return {isPlayer:isP,pi,name,color,skill,
-    x:lerp(WALL+95,W-WALL-95,slot/5),y:118,vx:0,vy:0,
+    x:lerp(WALL+95,W-WALL-95,total===1?0.5:slot/(total-1)),y:118,vx:0,vy:0,
     phase:jr()*TAU,wf:0.5+jr()*1.1,wa:(1-skill)*60+8,laneOff:(jr()-0.5)*76,
     finished:false,finishTime:0,falls:0,slowT:0,stuck2:0,falling:null,fallScale:1,
     trail:[],spin:0,_camY:null,_shake:0};
@@ -1003,18 +1033,56 @@ $('btnStart').onclick=()=>startRace(false);
 $('btnAgain').onclick=()=>startRace(false);
 $('btnNew').onclick=()=>startRace(true);
 $('btnMenu').onclick=()=>goMenu();
-document.querySelectorAll('.diff').forEach(btn=>{
-  btn.onclick=()=>{
-    const attr = btn.dataset.mode!==undefined?'data-mode'
-               : btn.dataset.ai!==undefined?'data-ai'
-               : btn.dataset.len!==undefined?'data-len':'data-screen';
-    document.querySelectorAll(`.diff[${attr}]`).forEach(b=>b.classList.remove('on'));
-    btn.classList.add('on');
-    if(btn.dataset.mode!==undefined){ mode=btn.dataset.mode; updateScreenRow(); }
-    else if(btn.dataset.ai!==undefined){ diffKey=btn.dataset.ai; refreshBest(); }
-    else if(btn.dataset.len!==undefined){ lenKey=btn.dataset.len; refreshBest(); }
-    else { spectateSplit = btn.dataset.screen==='2'; }
-  };
+/* ---------- 菜单：数量/命名构建（事件委托，兼容动态按钮） ---------- */
+function buildCountRow(){
+  const row=$('countRow');
+  row.innerHTML='';
+  for(let i=1;i<=10;i++){
+    const b=document.createElement('button');
+    b.className='diff cnt'+(i===ballCount?' on':'');
+    b.dataset.cnt=i;
+    b.textContent=i;
+    row.appendChild(b);
+  }
+}
+function buildNameGrid(){
+  const grid=$('nameGrid');
+  grid.innerHTML='';
+  BALL_POOL.forEach((e,i)=>{
+    const cell=document.createElement('div');
+    cell.className='namecell'+(i<ballCount?'':' off');
+    const dot=document.createElement('span');
+    dot.className='dot';dot.style.background=e.color;dot.style.color=e.color;
+    const inp=document.createElement('input');
+    inp.maxLength=6;inp.value=customNames[i];inp.dataset.i=i;
+    cell.append(dot,inp);
+    grid.appendChild(cell);
+  });
+}
+function refreshNameGrid(){
+  document.querySelectorAll('#nameGrid .namecell').forEach((c,i)=>c.classList.toggle('off',i>=ballCount));
+}
+$('menu').addEventListener('click',e=>{
+  const btn=e.target.closest('.diff');
+  if(!btn) return;
+  const attr = btn.dataset.mode!==undefined?'data-mode'
+             : btn.dataset.ai!==undefined?'data-ai'
+             : btn.dataset.len!==undefined?'data-len'
+             : btn.dataset.cnt!==undefined?'data-cnt':'data-screen';
+  document.querySelectorAll(`.diff[${attr}]`).forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  if(btn.dataset.mode!==undefined){ mode=btn.dataset.mode; updateScreenRow(); }
+  else if(btn.dataset.ai!==undefined){ diffKey=btn.dataset.ai; refreshBest(); }
+  else if(btn.dataset.len!==undefined){ lenKey=btn.dataset.len; refreshBest(); }
+  else if(btn.dataset.cnt!==undefined){ ballCount=+btn.dataset.cnt; saveRoster(); refreshNameGrid(); }
+  else { spectateSplit = btn.dataset.screen==='2'; }
+});
+$('nameGrid').addEventListener('input',e=>{
+  const i=+e.target.dataset.i;
+  if(Number.isInteger(i)&&e.target.value!==undefined){
+    customNames[i]=e.target.value.trim()||BALL_POOL[i].name;
+    saveRoster();
+  }
 });
 
 /* ================= 渲染 ================= */
@@ -1294,7 +1362,7 @@ function drawViewHUD(p,vx,vy,vw,vh,sIdx){
   // 右上实时排名（观赛模式下可点击切换）
   const bx=vw-186;
   ctx.fillStyle='rgba(8,14,28,0.62)';
-  ctx.beginPath();ctx.roundRect(bx-14,46,200,25+6*26,12);ctx.fill();
+  ctx.beginPath();ctx.roundRect(bx-14,46,200,25+balls.length*26,12);ctx.fill();
   ctx.strokeStyle='rgba(90,130,200,0.35)';ctx.stroke();
   ctx.font='bold 13px system-ui,"Microsoft YaHei"';ctx.fillStyle='#7e97c4';
   ctx.fillText('实时排名',bx,70);
@@ -1483,6 +1551,9 @@ function frame(ts){
 }
 
 /* ================= 启动 ================= */
+loadRoster();
+buildCountRow();
+buildNameGrid();
 track=genTrack(seed,AILVLS[diffKey].scale,trackLen);
 balls=makeBalls();
 refreshBest();
