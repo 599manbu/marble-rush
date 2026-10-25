@@ -5,3 +5,4 @@ desktop.ini
 *.log
 *.tmp
 ~$*
+"*.zip"  
