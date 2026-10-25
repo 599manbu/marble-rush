@@ -47,14 +47,9 @@
   tr.me td{background:rgba(255,213,74,.10);color:#ffe9a8}
   .dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px;vertical-align:-1px;
     box-shadow:0 0 8px currentColor}
-  #touch{position:fixed;bottom:18px;left:0;right:0;display:none;justify-content:space-between;
-    padding:0 26px;z-index:15;pointer-events:none}
-  @media (pointer:coarse){ #touch{display:flex} }
-  .tbtn{width:66px;height:66px;border-radius:50%;background:rgba(30,48,86,.55);border:1px solid #3a5a97;
-    color:#cfe0ff;font-size:24px;display:flex;align-items:center;justify-content:center;pointer-events:auto;
-    touch-action:none}
-  .tbtn:active{background:rgba(70,110,180,.7)}
-  .tgroup{display:flex;gap:14px}
+  #touch{display:none}
+  .mobile-hint{display:none;margin-top:8px;font-size:12px;color:#7ec9a9;letter-spacing:1px}
+  @media (pointer:coarse){ .mobile-hint{display:block} }
 </style>
 </head>
 <body>
@@ -102,8 +97,9 @@
     <div class="keys">
       P1（金）<kbd>A</kbd><kbd>D</kbd> 转向 · <kbd>W</kbd> 刹车　P2（蓝）<kbd>←</kbd><kbd>→</kbd> 转向 · <kbd>↑</kbd> 刹车<br>
       观赛模式：<kbd>空格</kbd> 切换视角（双屏：左屏固定榜首，空格切右屏）· <kbd>1</kbd>-<kbd>6</kbd> 直选 · 点击战况条<br>
-      单人模式下两套按键均可操作　<kbd>R</kbd> 重开　<kbd>P</kbd> 暂停　<kbd>M</kbd> 静音　<kbd>Esc</kbd> 返回菜单
+      <kbd>R</kbd> 重开　<kbd>P</kbd> 暂停　<kbd>M</kbd> 静音　<kbd>Esc</kbd> 返回菜单
     </div>
+    <div class="mobile-hint">📱 手机可玩：左下角虚拟摇杆转向（推得越满转得越急），上推刹车；双人模式左右各一个摇杆，建议横屏</div>
   </div>
 </div>
 
@@ -124,16 +120,7 @@
   </div>
 </div>
 
-<!-- 触屏控制（单人模式） -->
-<div id="touch">
-  <div class="tgroup">
-    <div class="tbtn" data-k="left">◀</div>
-    <div class="tbtn" data-k="right">▶</div>
-  </div>
-  <div class="tgroup">
-    <div class="tbtn" data-k="up">▼</div>
-  </div>
-</div>
+<!-- 触屏由 Canvas 内置虚拟摇杆实现（左下 P1 / 双人时右下 P2） -->
 
 <script>
 'use strict';
@@ -306,20 +293,68 @@ function effKeys(b){
   return {left:keys1.left|keys2.left, right:keys1.right|keys2.right,
           up:keys1.up|keys2.up, down:keys1.down|keys2.down};
 }
-document.querySelectorAll('.tbtn').forEach(el=>{
-  const k=el.dataset.k;
-  const on=e=>{e.preventDefault();ensureAudio();keys1[k]=1;};
-  const off=e=>{e.preventDefault();keys1[k]=0;};
-  el.addEventListener('pointerdown',on);
-  el.addEventListener('pointerup',off);
-  el.addEventListener('pointerleave',off);
-  el.addEventListener('pointercancel',off);
-});
-// 点击：返回按钮 / 确认弹窗 / 观赛切换
+/* ================= 虚拟摇杆（触屏） ================= */
+const IS_TOUCH = window.matchMedia('(pointer:coarse)').matches;
+let touchSeen = IS_TOUCH;
+const joys=[{pid:null,bx:0,by:0,dx:0,dy:0,x:0,y:0},{pid:null,bx:0,by:0,dx:0,dy:0,x:0,y:0}];
+const JOY_R=58;                                             // 摇杆行程半径
+function joySlots(){                                        // 当前需要的摇杆：P1 左下；双人时 P2 右下
+  if(state==='menu'||paused||backPrompt) return [];
+  if(mode==='1p') return [0];
+  if(mode==='2p') return [0,1];
+  return [];
+}
+function joyBase(i){ return i===0 ? [116,ch-128] : [cw-116,ch-128]; }
+function joyHit(x,y){
+  for(const s of joySlots()){
+    const [bx,by]=joyBase(s);
+    if(Math.hypot(x-bx,y-by)<90) return s;
+  }
+  return -1;
+}
+function joyMove(j,x,y){
+  const dx=x-j.bx, dy=y-j.by;
+  const d=Math.hypot(dx,dy)||1;
+  const cl=Math.min(d,JOY_R);
+  j.dx=dx/d*cl; j.dy=dy/d*cl;
+  j.x=j.dx/JOY_R; j.y=j.dy/JOY_R;
+}
+const joyEnd=e=>{ for(const j of joys) if(j.pid===e.pointerId){ j.pid=null; j.dx=j.dy=j.x=j.y=0; } };
+canvas.addEventListener('pointermove',e=>{
+  for(const j of joys) if(j.pid===e.pointerId){ joyMove(j,e.clientX,e.clientY); e.preventDefault(); }
+},{passive:false});
+canvas.addEventListener('pointerup',joyEnd);
+canvas.addEventListener('pointercancel',joyEnd);
+function drawJoysticks(){
+  for(const s of joySlots()){
+    const j=joys[s];
+    const [bx,by]=joyBase(s);
+    ctx.globalAlpha=j.pid!==null?0.9:0.45;
+    ctx.beginPath();ctx.arc(bx,by,66,0,TAU);
+    ctx.fillStyle='rgba(14,23,44,0.6)';ctx.fill();
+    ctx.strokeStyle='rgba(120,170,240,0.75)';ctx.lineWidth=2;ctx.stroke();
+    ctx.beginPath();ctx.arc(bx+j.dx,by+j.dy,30,0,TAU);
+    ctx.fillStyle=s===0?'rgba(255,213,74,0.85)':'rgba(108,208,255,0.85)';
+    ctx.fill();
+    ctx.globalAlpha=1;
+  }
+}
+// 点击：摇杆优先 / 返回按钮 / 确认弹窗 / 观赛切换
 canvas.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch') touchSeen=true;
   if(state==='menu') return;
   const rect=canvas.getBoundingClientRect();
   const x=e.clientX-rect.left, y=e.clientY-rect.top;
+  const s=joyHit(x,y);
+  if(s>=0){                                                 // 触到摇杆：捕获该指针
+    e.preventDefault();
+    const j=joys[s];
+    j.pid=e.pointerId;
+    const [bx,by]=joyBase(s);
+    j.bx=bx; j.by=by;
+    joyMove(j,x,y);
+    return;
+  }
   for(const t of clickTargets){
     if(x<t.x||x>t.x+t.w||y<t.y||y>t.y+t.h) continue;
     if(t.act==='back'){ backPrompt=true; return; }
@@ -770,8 +805,12 @@ function physics(dt){
     if(!b.finished){
       if(b.isPlayer){
         const k=effKeys(b);
-        fx=(k.right-k.left)*820;
-        fy=GY-(k.up?520:0);          // 无加速功能：只有转向与刹车
+        const j=joys[mode==='2p'&&b.pi===1?1:0];
+        let sx=(k.right-k.left);
+        if(j.pid!==null && Math.abs(j.x)>0.12) sx=j.x;        // 摇杆模拟量转向
+        const brake=k.up||(j.pid!==null&&j.y<-0.45);           // 摇杆上推=刹车
+        fx=sx*820;
+        fy=GY-(brake?520:0);          // 无加速功能：只有转向与刹车
       }else{ [fx,fy]=aiForce(b); }
     }else{ fy=GY*0.25; }
     b.vx+=fx*dt; b.vy+=fy*dt;
@@ -1374,6 +1413,7 @@ function render(){
     ctx.fillStyle='rgba(142,166,207,0.8)';ctx.font='13px system-ui';ctx.textAlign='left';
     ctx.fillText('🔇 已静音 (M)',14,ch-14);
   }
+  if(touchSeen) drawJoysticks();
   if(backPrompt) drawBackPrompt();
 }
 /* ---------- 返回菜单按钮与确认弹窗 ---------- */
