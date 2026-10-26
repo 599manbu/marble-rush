@@ -1,37 +1,48 @@
-# 赛球 · Marble Rush —— 微信小游戏移植准备
+# 赛球 · Marble Rush —— 微信小游戏版
 
-当前仓库主线是**单文件 H5 版**（根目录 `index.html`，浏览器双击即玩）。
-微信"小游戏"没有浏览器 DOM/BOM，`index.html` 不能直接上传，需要按下面的清单移植。
-本目录已配好开发者工具工程：**用微信开发者工具 → 导入 → 选择 `weapp/` 目录（游客模式 AppID）即可看到占位画面**，验证工具链通畅。
+本目录是**可直接运行的小游戏工程**：用微信开发者工具导入 `weapp/`（测试号即可）就能玩完整游戏。
+H5 单文件版仍在仓库根目录 `index.html`，两者玩法一致。
 
 ## 工程文件
 
 | 文件 | 作用 |
 |---|---|
-| `project.config.json` | 开发者工具工程配置；上线前把 `appid` 换成自己的（现在是游客模式 `touristappid`） |
+| `project.config.json` | 开发者工具工程配置；上线前把 `appid` 换成自己的（现在是测试号 `touristappid`） |
 | `game.json` | 小游戏配置：竖屏 |
-| `game.js` | 占位入口（画一屏文字），移植时从这里接管 |
-| `上线资料.md` | **名称 / 简称 / 简介 / 头像 / 服务类目**，注册时直接复制 |
+| `game.js` | **完整游戏入口**（约 1700 行，单文件，无外部依赖） |
+| `上线资料.md` | **名称 / 简称 / 简介 / 头像 / 服务类目 / 提审文案**，注册时直接复制 |
 | `assets/icon-144.png` | 小程序头像（144×144，上传用） |
 | `assets/icon-512.png` | 高清图标（宣传素材） |
-| `assets/icon-source.html` | 图标源文件，改配色后重新截图即可 |
+| `assets/screenshots/` | 12 张提审截图（场景/玩法/背景各 3 张 + 系统各 1 张） |
 
-## 移植清单（H5 → 小游戏）
+## 已完成的适配
 
-主循环、物理、AI、赛道生成、Canvas 渲染都是纯 JS，基本可以直接复用；
-**所有依赖 DOM/BOM 的部分**需要改造：
+- **UI 全部 Canvas 绘制**：主菜单、结算、设置、返回确认，按 430 宽虚拟坐标自适应缩放，小屏也能完整显示
+- **存储**：`wx.getStorageSync` / `wx.setStorageSync`（命名、最佳成绩、设置）
+- **音频**：`wx.createWebAudioContext()` 合成音效（基础库 ≥ 2.19.0）
+- **触控**：`wx.onTouchStart/Move/End`，支持多点触控（摇杆/按钮各自独立）
+- **改名**：点菜单里的名字方框 → `wx.showKeyboard`
+- **离屏 canvas**：名字标签缓存用 `wx.createCanvas()`
+- **屏幕**：`wx.getSystemInfoSync()` 取尺寸与像素比
 
-1. **UI 层全部改为 Canvas 绘制**：主菜单（模式/赛道/难度/数量/命名）、结算面板、设置面板、返回确认弹窗，目前都是 DOM 元素（`#menu`、`#results`、`#settings`），小游戏里没有 `document`。
-2. **文字输入**：选手命名用 `wx.showKeyboard()` + `wx.onKeyboardInput()` 实现。
-3. **存储**：`localStorage` → `wx.getStorageSync()` / `wx.setStorageSync()`（命名、最佳成绩、设置三处 key）。
-4. **音频**：`new AudioContext()` → `wx.createWebAudioContext()`（基础库 ≥ 2.19.0）。
-   若真机上振荡器（Oscillator）兼容不佳，兜底方案是预生成音频文件 + `wx.createInnerAudioContext()`。
-5. **触控**：canvas 的 pointer 事件 → `wx.onTouchStart / onTouchMove / onTouchEnd`（触点数据结构相近，摇杆与按钮逻辑可平移）。
-6. **屏幕**：`window.innerWidth/innerHeight`、`devicePixelRatio`、`resize` → `wx.getSystemInfoSync()` + `wx.onWindowResize()`。
-7. **离屏 canvas**：名字标签缓存用了 `document.createElement('canvas')` → 小游戏里再次调用 `wx.createCanvas()` 即为离屏画布。
-8. **其它**：`matchMedia('(pointer:coarse)')` 在小游戏里恒为触屏；`requestAnimationFrame` 小游戏全局自带，无需改动。
+## 玩法与操作
 
-建议做法：H5 版里把"平台差异"收拢成一个小适配层（storage / audio / input / screen 四个模块），H5 与小游戏各写一份实现，游戏主体保持一份代码。
+- 单人 / 双人分屏 / 全 AI 观赛；赛道长度、AI 难度、小球数量自由组合
+- 默认左下虚拟摇杆（上推刹车），可在设置里切换为**左右按钮**（◀ ▶）
+- 设置里可调音效音量、静音；全部保存在本机
+
+## 已知限制 / 待真机验证
+
+1. **音频**：部分机型 `wx.createWebAudioContext` 的振荡器兼容性需真机验证；若无声音，可改用预生成音频 + `wx.createInnerAudioContext()`
+2. **键盘**：改名弹窗在真机上的位置与收起行为需确认
+3. **性能**：最长赛道 + 双人分屏在低端机上的帧率需实测
+4. **截图**：现有 12 张由游戏本体渲染，正式提审建议在真机上重截
+
+## 上线步骤（微信公众平台）
+
+1. **注册小程序账号**：[mp.weixin.qq.com](https://mp.weixin.qq.com) 注册，类目选**小游戏**。
+   个人主体可以发布小游戏（部分类目/能力受限）；企业主体可选择的类目与资质要求更多。
+2. **获取 AppID**：填入 `weapp/project.config.json` 的 `appid`。
 
 ## 上线步骤（微信公众平台）
 
