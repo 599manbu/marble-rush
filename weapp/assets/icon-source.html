@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0a1020}
+  svg{display:block;width:100vw;height:100vh}
+</style>
+</head>
+<body>
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="30%" cy="24%" r="95%">
+      <stop offset="0" stop-color="#1b2c52"/>
+      <stop offset="0.55" stop-color="#101a33"/>
+      <stop offset="1" stop-color="#060b18"/>
+    </radialGradient>
+    <linearGradient id="track" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#243a66"/>
+      <stop offset="1" stop-color="#16233f"/>
+    </linearGradient>
+    <linearGradient id="ball" x1="0.2" y1="0.15" x2="0.85" y2="0.95">
+      <stop offset="0" stop-color="#fff6cf"/>
+      <stop offset="0.35" stop-color="#ffd54a"/>
+      <stop offset="1" stop-color="#c98600"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd54a" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffd54a" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6cd0ff"/>
+      <stop offset="1" stop-color="#2a7fb8"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="100" height="100" fill="url(#bg)"/>
+
+  <!-- 赛道：从左上到右下的滑道 -->
+  <g transform="rotate(-32 50 50)">
+    <rect x="8" y="34" width="84" height="32" rx="3" fill="url(#track)"/>
+    <rect x="8" y="34" width="3.5" height="32" fill="url(#edge)"/>
+    <rect x="88.5" y="34" width="3.5" height="32" fill="url(#edge)"/>
+    <!-- 赛道横纹 -->
+    <g fill="#0d1730" opacity="0.55">
+      <rect x="20" y="34" width="3" height="32"/>
+      <rect x="34" y="34" width="3" height="32"/>
+      <rect x="48" y="34" width="3" height="32"/>
+      <rect x="62" y="34" width="3" height="32"/>
+      <rect x="76" y="34" width="3" height="32"/>
+    </g>
+  </g>
+
+  <!-- 弹珠拖尾 -->
+  <path d="M28 72 Q40 66 50 60" stroke="url(#trail)" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.85"/>
+
+  <!-- 弹珠本体 -->
+  <circle cx="61" cy="54" r="19.5" fill="#000" opacity="0.35" transform="translate(1.6,2.6)"/>
+  <circle cx="61" cy="54" r="19.5" fill="url(#ball)"/>
+  <circle cx="61" cy="54" r="19.5" fill="none" stroke="#8a5c00" stroke-width="1.2" opacity="0.6"/>
+  <ellipse cx="54.5" cy="47.5" rx="6.2" ry="4.6" fill="#ffffff" opacity="0.75" transform="rotate(-28 54.5 47.5)"/>
+  <circle cx="67" cy="61" r="2.2" fill="#ffffff" opacity="0.35"/>
+
+  <!-- 小机关：右侧弹射台 -->
+  <circle cx="83" cy="30" r="6.4" fill="#3a1620" stroke="#ff5d5d" stroke-width="2.2"/>
+  <circle cx="83" cy="30" r="2.6" fill="#ff5d5d"/>
+</svg>
+</body>
+</html>

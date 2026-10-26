@@ -11,6 +11,10 @@
 | `project.config.json` | 开发者工具工程配置；上线前把 `appid` 换成自己的（现在是游客模式 `touristappid`） |
 | `game.json` | 小游戏配置：竖屏 |
 | `game.js` | 占位入口（画一屏文字），移植时从这里接管 |
+| `上线资料.md` | **名称 / 简称 / 简介 / 头像 / 服务类目**，注册时直接复制 |
+| `assets/icon-144.png` | 小程序头像（144×144，上传用） |
+| `assets/icon-512.png` | 高清图标（宣传素材） |
+| `assets/icon-source.html` | 图标源文件，改配色后重新截图即可 |
 
 ## 移植清单（H5 → 小游戏）
 
