@@ -20,7 +20,7 @@ function draw() {
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ffd54a';
   ctx.font = 'bold 34px sans-serif';
-  ctx.fillText('赛 球', w / 2, h / 2 - 46);
+  ctx.fillText('赛球弹珠竞速', w / 2, h / 2 - 46);
   ctx.fillStyle = '#8ea6cf';
   ctx.font = '13px sans-serif';
   ctx.fillText('MARBLE RUSH · 微信小游戏版准备中', w / 2, h / 2 - 14);

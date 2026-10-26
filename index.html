@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#05070d">
-<title>赛球 · Marble Rush</title>
+<title>赛球弹珠竞速 · Marble Rush</title>
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#05070d;
@@ -17,7 +17,8 @@
   .panel{background:linear-gradient(160deg,#101a33,#0a1122);border:1px solid #2b3f6b;border-radius:18px;
     padding:24px 36px 28px;box-shadow:0 24px 80px rgba(0,0,0,.65);text-align:center;max-width:640px;
     width:min(93vw,640px);max-height:94vh;overflow-y:auto}
-  .title{font-size:50px;font-weight:900;letter-spacing:8px;margin:2px 0 2px;
+  .title{font-size:clamp(30px,7.4vw,50px);font-weight:900;letter-spacing:clamp(1px,.9vw,7px);margin:2px 0 2px;
+    white-space:nowrap;
     background:linear-gradient(120deg,#ffd54a,#ff8a5c 45%,#6cd0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
   .subtitle{font-size:13px;letter-spacing:6px;color:#8ea6cf;margin-bottom:14px}
   .desc{text-align:left;font-size:13px;line-height:1.75;color:#c3d3ef;background:rgba(20,32,60,.5);
@@ -71,7 +72,7 @@
 <!-- 开始菜单 -->
 <div id="menu" class="overlay">
   <div class="panel">
-    <div class="title">赛 球</div>
+    <div class="title">赛球弹珠竞速</div>
     <div class="subtitle">MARBLE RUSH · 弹珠障碍追逐赛</div>
     <div class="desc">
       上帝视角弹珠竞速：冲下<b>超长滑坡赛道</b>，穿过石门关隘、旋转风车、来回活塞、弹射器、漏斗与陷阱洞，
