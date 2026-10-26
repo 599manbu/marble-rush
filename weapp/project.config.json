@@ -1,0 +1,13 @@
+{
+  "appid": "touristappid",
+  "compileType": "game",
+  "projectname": "marble-rush",
+  "libVersion": "latest",
+  "setting": {
+    "es6": true,
+    "urlCheck": false,
+    "minified": true
+  },
+  "simulatorType": "wechat",
+  "simulatorPluginLibVersion": {}
+}

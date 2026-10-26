@@ -59,6 +59,10 @@
   .namecell .dot{margin:0;flex:none;width:10px;height:10px}
   .mobile-hint{display:none;margin-top:8px;font-size:12px;color:#7ec9a9;letter-spacing:1px}
   @media (pointer:coarse){ .mobile-hint{display:block} }
+  .volrow{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:8px}
+  .volrow input[type=range]{width:min(320px,58vw);height:26px;accent-color:#ffd54a;cursor:pointer}
+  .volrow b{min-width:46px;text-align:left;font-size:15px;color:#ffe9a8}
+  .ctrl-desc{font-size:12px;color:#7ec9a9;letter-spacing:1px;margin:2px 0 6px;line-height:1.9}
 </style>
 </head>
 <body>
@@ -106,13 +110,14 @@
     <div class="rowlbl">选手命名（点击方框输入，自动保存）</div>
     <div id="nameGrid"></div>
     <button id="btnStart" class="btn">开始比赛 ▶</button>
+    <div class="btnrow" style="margin-top:10px"><button id="btnSettings" class="diff">⚙ 设置</button></div>
     <div class="best" id="bestLabel">单人最佳（普通）：--:--.-</div>
     <div class="keys">
       P1（金）<kbd>A</kbd><kbd>D</kbd> 转向 · <kbd>W</kbd> 刹车　P2（蓝）<kbd>←</kbd><kbd>→</kbd> 转向 · <kbd>↑</kbd> 刹车<br>
       观赛模式：<kbd>空格</kbd> 切换视角（双屏：左屏固定榜首，空格切右屏）· <kbd>1</kbd>-<kbd>6</kbd> 直选 · 点击战况条<br>
       <kbd>R</kbd> 重开　<kbd>P</kbd> 暂停　<kbd>M</kbd> 静音　<kbd>Esc</kbd> 返回菜单
     </div>
-    <div class="mobile-hint">📱 手机可玩：左下角虚拟摇杆转向（推得越满转得越急），上推刹车；双人模式左右各一个摇杆，建议横屏</div>
+    <div class="mobile-hint">📱 手机可玩：默认左下角虚拟摇杆转向（上推刹车），双人模式左右各一个摇杆，建议横屏；可在 ⚙ 设置 中切换为左右按钮（下方 ◀ 左 / ▶ 右）并调节音效音量</div>
   </div>
 </div>
 
@@ -133,7 +138,31 @@
   </div>
 </div>
 
-<!-- 触屏由 Canvas 内置虚拟摇杆实现（左下 P1 / 双人时右下 P2） -->
+<!-- 触屏由 Canvas 内置虚拟摇杆实现（左下 P1 / 双人时右下 P2），可在设置中切换为左右按钮 -->
+
+<!-- 设置面板 -->
+<div id="settings" class="overlay hidden">
+  <div class="panel">
+    <h2 class="res">设 置</h2>
+    <div class="resnote">操作方式与音效会自动保存在本机</div>
+    <div class="rowlbl">操作方式（手机触屏）</div>
+    <div class="diffrow">
+      <button class="diff ctrl" data-ctrl="joy">虚拟摇杆</button>
+      <button class="diff ctrl" data-ctrl="btn">左右按钮</button>
+    </div>
+    <div class="ctrl-desc" id="ctrlDesc"></div>
+    <div class="rowlbl">音效音量</div>
+    <div class="volrow">
+      <input id="volSlider" type="range" min="0" max="100" step="1" value="45" aria-label="音效音量">
+      <b id="volLabel">45%</b>
+    </div>
+    <div class="btnrow">
+      <button id="btnMute" class="diff on">音效 开</button>
+      <button id="btnVolTest" class="diff">🔊 试听</button>
+    </div>
+    <div class="btnrow" style="margin-top:14px"><button id="btnCloseSettings" class="btn ghost">关闭 ✕</button></div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -171,9 +200,10 @@ function ensureAudio(){
   if(AC) { if(AC.state==='suspended') AC.resume(); return; }
   try{
     AC = new (window.AudioContext||window.webkitAudioContext)();
-    master = AC.createGain(); master.gain.value = 0.45; master.connect(AC.destination);
+    master = AC.createGain(); master.gain.value = settings.vol; master.connect(AC.destination);
   }catch(e){}
 }
+function applyVolume(){ if(master) master.gain.value = settings.vol; }   // 设置面板实时调音量
 function tone(f0,f1,dur,type,vol,delay){
   if(!AC||muted) return;
   const t = AC.currentTime + (delay||0);
@@ -185,6 +215,22 @@ function tone(f0,f1,dur,type,vol,delay){
   g.gain.exponentialRampToValueAtTime(0.001, t+dur);
   o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.03);
 }
+
+/* ================= 设置（操作方式 / 音效，自动保存） ================= */
+let settings={ctrl:'joy', vol:0.45, mute:false};   // ctrl: 'joy'=虚拟摇杆 | 'btn'=左右按钮
+let settingsOpen=false;                            // 游戏中打开设置面板（暂停模拟）
+function loadSettings(){
+  try{
+    const s=JSON.parse(localStorage.getItem('marbleSettings'));
+    if(s){
+      if(s.ctrl==='btn') settings.ctrl='btn';
+      if(typeof s.vol==='number') settings.vol=clamp(s.vol,0,1);
+      settings.mute=!!s.mute;
+    }
+  }catch(e){}
+  muted=settings.mute;
+}
+function saveSettings(){ try{localStorage.setItem('marbleSettings',JSON.stringify(settings))}catch(e){} }
 function sndImpact(imp){
   const now = performance.now();
   if(now - lastThock < 45) return; lastThock = now;
@@ -295,6 +341,7 @@ function updateScreenRow(){
 window.addEventListener('keydown',e=>{
   ensureAudio();
   if(e.code.startsWith('Arrow')||e.code==='Space') e.preventDefault();
+  if(settingsOpen){ if(e.code==='Escape'||e.code==='Enter') closeSettings(); return; }
   setKey(e.code,1);
   if(mode==='spectate'&&state!=='menu'){
     const s=spectateSplit?1:0;                 // 双屏：空格只切右屏（左屏固定榜首）
@@ -312,7 +359,7 @@ window.addEventListener('keydown',e=>{
   if(backPrompt&&e.code==='Enter'){ goMenu(); enterUsed=true; }
   if(e.code==='KeyR' && (state==='race'||state==='finishing'||state==='results')) startRace(false);
   if(e.code==='KeyP' && (state==='race'||state==='finishing')) paused=!paused;
-  if(e.code==='KeyM') muted=!muted;
+  if(e.code==='KeyM'){ muted=!muted; settings.mute=muted; saveSettings(); }
   if(e.code==='Enter' && state==='menu' && !enterUsed) startRace(false);
 });
 window.addEventListener('keyup',e=>setKey(e.code,0));
@@ -347,12 +394,16 @@ function joyMove(j,x,y){
   j.dx=dx/d*cl; j.dy=dy/d*cl;
   j.x=j.dx/JOY_R; j.y=j.dy/JOY_R;
 }
-const joyEnd=e=>{ for(const j of joys) if(j.pid===e.pointerId){ j.pid=null; j.dx=j.dy=j.x=j.y=0; } };
+const endPointer=e=>{
+  for(const j of joys) if(j.pid===e.pointerId){ j.pid=null; j.dx=j.dy=j.x=j.y=0; }
+  if(btnPresses.delete(e.pointerId)) syncBtnState();
+};
 canvas.addEventListener('pointermove',e=>{
   for(const j of joys) if(j.pid===e.pointerId){ joyMove(j,e.clientX,e.clientY); e.preventDefault(); }
 },{passive:false});
-canvas.addEventListener('pointerup',joyEnd);
-canvas.addEventListener('pointercancel',joyEnd);
+canvas.addEventListener('pointerup',endPointer);
+canvas.addEventListener('pointercancel',endPointer);
+window.addEventListener('blur',()=>{ btnPresses.clear(); syncBtnState(); });
 function drawJoysticks(){
   for(const s of joySlots()){
     const j=joys[s];
@@ -367,13 +418,64 @@ function drawJoysticks(){
     ctx.globalAlpha=1;
   }
 }
-// 点击：摇杆优先 / 返回按钮 / 确认弹窗 / 观赛切换
+/* ================= 左右按钮（触屏另一种操作：屏幕下方 左=左转 / 右=右转） ================= */
+const btnState=[{left:0,right:0},{left:0,right:0}];
+const btnPresses=new Map();                     // pointerId -> {p,key}（多点触控各自独立）
+function btnSlots(){                            // 按钮模式且处于可操作状态时显示
+  if(settings.ctrl!=='btn') return false;
+  if(state==='menu'||paused||backPrompt||settingsOpen) return false;
+  return mode==='1p'||mode==='2p';
+}
+function btnLayout(){                           // 单人：左下 ◀ / 右下 ▶；双人：左右各一组
+  const r=cw<430?46:54, cy=ch-(r+66);
+  if(mode!=='2p')
+    return [{p:0,key:'left', x:88,   y:cy, r:r, icon:'◀'},
+            {p:0,key:'right',x:cw-88, y:cy, r:r, icon:'▶'}];
+  const g=r*2.4;
+  return [{p:0,key:'left', x:72,      y:cy, r:r, icon:'◀'},
+          {p:0,key:'right',x:72+g,    y:cy, r:r, icon:'▶'},
+          {p:1,key:'left', x:cw-72-g, y:cy, r:r, icon:'◀'},
+          {p:1,key:'right',x:cw-72,   y:cy, r:r, icon:'▶'}];
+}
+function syncBtnState(){
+  btnState[0].left=btnState[0].right=0;
+  btnState[1].left=btnState[1].right=0;
+  for(const pr of btnPresses.values()) btnState[pr.p][pr.key]=1;
+}
+function btnHit(x,y){
+  if(!btnSlots()) return null;
+  for(const bt of btnLayout())
+    if(Math.hypot(x-bt.x,y-bt.y)<bt.r+16) return bt;
+  return null;
+}
+function drawButtons(){
+  for(const bt of btnLayout()){
+    const on=btnState[bt.p][bt.key]>0;
+    ctx.globalAlpha=on?0.92:0.5;
+    ctx.beginPath();ctx.arc(bt.x,bt.y,bt.r,0,TAU);
+    ctx.fillStyle='rgba(14,23,44,0.62)';ctx.fill();
+    if(on){ctx.fillStyle=bt.p===0?'rgba(255,213,74,0.20)':'rgba(108,208,255,0.20)';ctx.fill();}
+    ctx.strokeStyle=bt.p===0?'rgba(255,213,74,0.8)':'rgba(108,208,255,0.8)';
+    ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle=on?'#ffe9a8':(bt.p===0?'rgba(255,213,74,0.9)':'rgba(108,208,255,0.9)');
+    ctx.font=`bold ${Math.round(bt.r*0.8)}px system-ui,"Microsoft YaHei"`;
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(bt.icon,bt.x,bt.y+2);
+    ctx.globalAlpha=1;
+  }
+  ctx.textBaseline='alphabetic';
+}
+// 点击：按钮(按钮模式) / 摇杆优先 / 设置 / 返回按钮 / 确认弹窗 / 观赛切换
 canvas.addEventListener('pointerdown',e=>{
   if(e.pointerType==='touch') touchSeen=true;
   if(state==='menu') return;
   const rect=canvas.getBoundingClientRect();
   const x=e.clientX-rect.left, y=e.clientY-rect.top;
-  const s=joyHit(x,y);
+  if(settings.ctrl==='btn'){                                // 左右按钮模式：按住即生效
+    const bt=btnHit(x,y);
+    if(bt){ e.preventDefault(); btnPresses.set(e.pointerId,{p:bt.p,key:bt.key}); syncBtnState(); return; }
+  }
+  const s=settings.ctrl==='btn' ? -1 : joyHit(x,y);
   if(s>=0){                                                 // 触到摇杆：捕获该指针
     e.preventDefault();
     const j=joys[s];
@@ -388,6 +490,7 @@ canvas.addEventListener('pointerdown',e=>{
     if(t.act==='back'){ backPrompt=true; return; }
     if(t.act==='promptNo'){ if(backPrompt) backPrompt=false; return; }
     if(t.act==='promptYes'){ if(backPrompt) goMenu(); return; }
+    if(t.act==='settings'){ openSettings(); return; }
     if(!backPrompt&&mode==='spectate') setFollow(t.i, spectateSplit?1:0);
     return;
   }
@@ -835,10 +938,17 @@ function physics(dt){
     if(!b.finished){
       if(b.isPlayer){
         const k=effKeys(b);
-        const j=joys[mode==='2p'&&b.pi===1?1:0];
+        const pi=mode==='2p'&&b.pi===1?1:0;
+        const j=joys[pi];
         let sx=(k.right-k.left);
-        if(j.pid!==null && Math.abs(j.x)>0.12) sx=j.x;        // 摇杆模拟量转向
-        const brake=k.up||(j.pid!==null&&j.y<-0.45);           // 摇杆上推=刹车
+        let brake=k.up;
+        if(settings.ctrl==='btn'){                             // 左右按钮：数字量转向（无刹车）
+          const bs=btnState[pi];
+          if(bs.right>bs.left) sx=1; else if(bs.left>bs.right) sx=-1;
+        }else if(j.pid!==null){
+          if(Math.abs(j.x)>0.12) sx=j.x;                       // 摇杆模拟量转向
+          if(j.y<-0.45) brake=true;                            // 摇杆上推=刹车
+        }
         fx=sx*820;
         fy=GY-(brake?520:0);          // 无加速功能：只有转向与刹车
       }else{ [fx,fy]=aiForce(b); }
@@ -974,12 +1084,15 @@ function startRace(newSeed){
   balls=makeBalls();
   raceTime=0;countdownT=3.0;lastCount=99;goT=-99;
   state='countdown';paused=false;resultsFinal=false;
+  closeSettings();
+  btnPresses.clear(); syncBtnState();
   particles.length=0;clickTargets.length=0;
   $('menu').classList.add('hidden');
   $('results').classList.add('hidden');
 }
 function goMenu(){
   state='menu'; paused=false; backPrompt=false;
+  closeSettings();
   particles.length=0; clickTargets.length=0;
   $('menu').classList.remove('hidden');
   $('results').classList.add('hidden');
@@ -1084,6 +1197,51 @@ $('nameGrid').addEventListener('input',e=>{
     saveRoster();
   }
 });
+/* ---------- 设置面板（操作方式 / 音效） ---------- */
+function updateCtrlUI(){
+  document.querySelectorAll('.ctrl').forEach(b=>b.classList.toggle('on',b.dataset.ctrl===settings.ctrl));
+  $('ctrlDesc').textContent = settings.ctrl==='btn'
+    ? '按钮：屏幕下方 ◀=左转（左）、▶=右转（右）；双人模式 P1 在左半边、P2 在右半边'
+    : '摇杆：左下角推动转向（推得越满转得越急），上推刹车；双人模式右下角为 P2，建议横屏';
+}
+function syncSettingsUI(){
+  updateCtrlUI();
+  $('volSlider').value=Math.round(settings.vol*100);
+  $('volLabel').textContent=Math.round(settings.vol*100)+'%';
+  const m=$('btnMute');
+  m.textContent=settings.mute?'音效 关':'音效 开';
+  m.classList.toggle('on',!settings.mute);
+}
+function openSettings(){
+  btnPresses.clear(); syncBtnState();     // 清掉残留按压，避免关闭后按钮卡住
+  for(const j of joys){ j.pid=null; j.dx=j.dy=j.x=j.y=0; }
+  syncSettingsUI();
+  $('settings').classList.remove('hidden');
+  if(state!=='menu') settingsOpen=true;   // 游戏中打开：暂停比赛
+}
+function closeSettings(){
+  $('settings').classList.add('hidden');
+  settingsOpen=false;
+}
+$('btnSettings').onclick=openSettings;
+$('btnCloseSettings').onclick=closeSettings;
+document.querySelectorAll('.ctrl').forEach(b=>b.onclick=()=>{
+  settings.ctrl=b.dataset.ctrl;
+  btnPresses.clear(); syncBtnState();     // 切换操作方式时松开残留的按钮
+  saveSettings(); updateCtrlUI();
+});
+$('volSlider').addEventListener('input',e=>{
+  settings.vol=clamp(+e.target.value,0,100)/100;
+  $('volLabel').textContent=e.target.value+'%';
+  applyVolume(); saveSettings();
+});
+$('volSlider').addEventListener('change',()=>{ ensureAudio(); if(!settings.mute&&settings.vol>0) sndBeep(); });
+$('btnMute').onclick=()=>{
+  settings.mute=!settings.mute; muted=settings.mute;
+  saveSettings(); syncSettingsUI();
+  if(!settings.mute&&settings.vol>0){ ensureAudio(); sndBeep(); }
+};
+$('btnVolTest').onclick=()=>{ ensureAudio(); sndBeep(); };
 
 /* ================= 渲染 ================= */
 function drawWorld(yTop,yBot){
@@ -1460,6 +1618,7 @@ function render(){
   }
   drawMinimap();
   if((state==='race'||state==='countdown')&&!backPrompt) drawBackButton();
+  if((state==='race'||state==='countdown')&&!backPrompt&&!settingsOpen) drawSettingsButton();
   if(state==='race'&&raceTime<4){
     ctx.textAlign='center';ctx.fillStyle='rgba(195,211,239,0.85)';
     ctx.font='15px system-ui,"Microsoft YaHei"';
@@ -1468,7 +1627,7 @@ function render(){
                   ? '观赛双屏 · 左屏固定榜首 · 空格切换右屏视角 · 点击顶部战况条选人'
                   : '观赛中 · 空格 / 1-6 切换视角 · 点击排名或战况条')
               : '← → 转向 · ↑ 刹车 · 可以撞对手抢线！';
-    ctx.fillText(tip,cw/2,ch-42);
+    ctx.fillText(tip,cw/2,ch-58);
   }
   if(paused){
     ctx.fillStyle='rgba(4,8,18,0.6)';ctx.fillRect(0,0,cw,ch);
@@ -1481,7 +1640,8 @@ function render(){
     ctx.fillStyle='rgba(142,166,207,0.8)';ctx.font='13px system-ui';ctx.textAlign='left';
     ctx.fillText('🔇 已静音 (M)',14,ch-14);
   }
-  if(touchSeen) drawJoysticks();
+  if(touchSeen&&settings.ctrl!=='btn') drawJoysticks();
+  if(btnSlots()) drawButtons();
   if(backPrompt) drawBackPrompt();
 }
 /* ---------- 返回菜单按钮与确认弹窗 ---------- */
@@ -1493,6 +1653,15 @@ function drawBackButton(){
   ctx.fillStyle='#9fb6df';ctx.font='13px system-ui,"Microsoft YaHei"';ctx.textAlign='center';
   ctx.fillText('⟵ 返回菜单 (Esc)',bx+bw/2,by+21);
   clickTargets.push({x:bx,y:by,w:bw,h:bh,act:'back'});
+}
+function drawSettingsButton(){
+  const bw=86,bh=30,bx=cw/2-bw/2,by=ch-bh-12;
+  ctx.fillStyle='rgba(8,14,28,0.66)';
+  ctx.beginPath();ctx.roundRect(bx,by,bw,bh,15);ctx.fill();
+  ctx.strokeStyle='rgba(90,130,200,0.4)';ctx.lineWidth=1;ctx.stroke();
+  ctx.fillStyle='#9fb6df';ctx.font='13px system-ui,"Microsoft YaHei"';ctx.textAlign='center';
+  ctx.fillText('⚙ 设置',bx+bw/2,by+20);
+  clickTargets.push({x:bx,y:by,w:bw,h:bh,act:'settings'});
 }
 function drawBackPrompt(){
   ctx.fillStyle='rgba(4,8,18,0.6)';ctx.fillRect(0,0,cw,ch);
@@ -1523,7 +1692,7 @@ let lastTs=0;
 function frame(ts){
   requestAnimationFrame(frame);
   const dt=clamp((ts-lastTs)/1000,0,0.05);lastTs=ts;
-  if(!paused&&!backPrompt){
+  if(!paused&&!backPrompt&&!settingsOpen){
     simTime+=dt;
     syncLeader();                                // 双屏观赛左屏跟随榜首
     if(state==='menu'){menuCam+=dt*80;}
@@ -1552,6 +1721,8 @@ function frame(ts){
 
 /* ================= 启动 ================= */
 loadRoster();
+loadSettings();
+syncSettingsUI();
 buildCountRow();
 buildNameGrid();
 track=genTrack(seed,AILVLS[diffKey].scale,trackLen);
