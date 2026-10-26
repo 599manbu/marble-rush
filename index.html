@@ -125,6 +125,7 @@
 <!-- 结算面板 -->
 <div id="results" class="overlay hidden">
   <div class="panel">
+    <div class="resnote" style="color:#6cd0ff;letter-spacing:4px;font-size:12px;margin:0 0 4px">赛球弹珠竞速</div>
     <h2 class="res" id="resTitle">完赛！</h2>
     <div class="resnote" id="resNote"></div>
     <table class="res">
@@ -1598,6 +1599,13 @@ function drawMinimap(){
   }
 }
 
+/* ---------- 角标：游戏名（提审截图需在画面内出现小游戏名） ---------- */
+function drawBrand(){
+  ctx.fillStyle='rgba(142,166,207,0.72)';
+  ctx.font='12px system-ui,"Microsoft YaHei"';
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  ctx.fillText('赛球弹珠竞速',14,ch-14);
+}
 /* ---------- 总渲染 ---------- */
 function render(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -1618,6 +1626,7 @@ function render(){
     renderView(0,0,cw,ch,players[0],0);
   }
   drawMinimap();
+  drawBrand();
   if((state==='race'||state==='countdown')&&!backPrompt) drawBackButton();
   if((state==='race'||state==='countdown')&&!backPrompt&&!settingsOpen) drawSettingsButton();
   if(state==='race'&&raceTime<4){
@@ -1639,7 +1648,7 @@ function render(){
   }
   if(muted){
     ctx.fillStyle='rgba(142,166,207,0.8)';ctx.font='13px system-ui';ctx.textAlign='left';
-    ctx.fillText('🔇 已静音 (M)',14,ch-14);
+    ctx.fillText('🔇 已静音 (M)',14,ch-34);
   }
   if(touchSeen&&settings.ctrl!=='btn') drawJoysticks();
   if(btnSlots()) drawButtons();
