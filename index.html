@@ -1502,7 +1502,7 @@ function drawViewHUD(p,vx,vy,vw,vh,sIdx){
   const spect = mode==='spectate';
   // 左上信息面板
   ctx.fillStyle='rgba(8,14,28,0.62)';
-  ctx.beginPath();ctx.roundRect(14,46,spect?250:196,spect?124:108,12);ctx.fill();
+  ctx.beginPath();ctx.roundRect(14,46,spect?226:196,spect?124:108,12);ctx.fill();
   ctx.strokeStyle='rgba(90,130,200,0.35)';ctx.stroke();
   ctx.textAlign='left';
   ctx.fillStyle=p.color;
@@ -1515,7 +1515,7 @@ function drawViewHUD(p,vx,vy,vw,vh,sIdx){
     ctx.fillText(`名次  第 ${rank} 名`,30,108);
     ctx.fillText(`时间  ${fmtT(raceTime)}　速度  ${(Math.hypot(p.vx,p.vy)/10).toFixed(1)} m/s`,30,132);
     ctx.fillStyle='#66809f';ctx.font='12px system-ui,"Microsoft YaHei"';
-    ctx.fillText('空格 / 1-6 切换视角 · 点击排名或顶部战况条',30,158);
+    ctx.fillText('空格 / 1-6 或点击切换视角',30,158);
   }else{
     ctx.fillText(`时间  ${fmtT(raceTime)}`,30,112);
     ctx.fillText(`速度  ${(Math.hypot(p.vx,p.vy)/10).toFixed(1)} m/s`,30,138);
