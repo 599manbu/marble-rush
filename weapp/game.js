@@ -192,6 +192,8 @@ function parseInvite(query) {
   inviteTime = +query.t || 0;
   inviteLastTime = 0;
   inviteFrom = query.from || '';
+  ghostSamples = query.g ? decodeGhost(query.g) : [];
+  if (!inviteTime && ghostSamples.length) inviteTime = 0;
   mode = 'invite';
   screen = 'invite';
   return true;
@@ -201,12 +203,15 @@ function enterInvite() {
   if (!inviteSeed) inviteSeed = (Math.random() * 1e9) | 0;
   inviteLastTime = 0;
   inviteTime = 0;
+  ghostSamples = [];
   screen = 'invite';
 }
 function shareChallenge() {
   if (!inviteSeed) inviteSeed = (Math.random() * 1e9) | 0;
-  const q = 'seed=' + inviteSeed + '&len=' + lenKey + '&ai=' + diffKey + '&c=' + ballCount +
-            '&t=' + (inviteLastTime ? Math.round(inviteLastTime * 100) / 100 : '') + '&from=invite';
+  let q = 'seed=' + inviteSeed + '&len=' + lenKey + '&ai=' + diffKey + '&c=' + ballCount +
+          '&t=' + (inviteLastTime ? Math.round(inviteLastTime * 100) / 100 : '') + '&from=invite';
+  // 幽灵轨迹：控制总长度，超长就只带成绩不带影子
+  if (inviteGhostStr && (q.length + inviteGhostStr.length + 4) < 950) q += '&g=' + inviteGhostStr;
   try {
     wx.shareAppMessage({
       title: inviteLastTime
@@ -226,13 +231,104 @@ function startInviteRace() {
 /* ================= 全局状态 ================= */
 let state = 'menu';
 let paused = false;
-let mode = 'solo';               // solo | level | invite | spectate
+let mode = 'level';              // level | invite | spectate
 let screen = 'menu';             // menu | levels | invite
 let currentLevel = 1;
 let levelProgress = { unlocked: 1, best: {} };
 let levelPage = 0;
 let inviteSeed = 0, inviteTime = 0, inviteLastTime = 0;
 let inviteFrom = '';
+let ghostSamples = [];          // 好友幽灵轨迹
+let ghostRecord = [];           // 本局录制
+let ghostRecT = 0;
+let inviteGhostStr = '';        // 压缩后的轨迹（分享卡携带）
+
+/* ================= 幽灵轨迹压缩（无服务器，走分享卡 query） ================= */
+const B64U = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function b64urlEncode(bytes) {
+  let out = '', i = 0;
+  for (; i + 2 < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out += B64U[(n >> 18) & 63] + B64U[(n >> 12) & 63] + B64U[(n >> 6) & 63] + B64U[n & 63];
+  }
+  const rem = bytes.length - i;
+  if (rem === 1) { const n = bytes[i] << 16; out += B64U[(n >> 18) & 63] + B64U[(n >> 12) & 63]; }
+  else if (rem === 2) { const n = (bytes[i] << 16) | (bytes[i + 1] << 8); out += B64U[(n >> 18) & 63] + B64U[(n >> 12) & 63] + B64U[(n >> 6) & 63]; }
+  return out;
+}
+function b64urlDecode(str) {
+  const idx = {};
+  for (let i = 0; i < 64; i++) idx[B64U[i]] = i;
+  const bytes = []; let buf = 0, bits = 0;
+  for (let i = 0; i < str.length; i++) {
+    const v = idx[str[i]];
+    if (v === undefined) continue;
+    buf = (buf << 6) | v; bits += 6;
+    if (bits >= 8) { bits -= 8; bytes.push((buf >> bits) & 255); }
+  }
+  return bytes;
+}
+function encodeGhost(samples) {
+  if (!samples || samples.length < 2) return '';
+  let arr = samples;
+  if (arr.length > 200) {
+    const out = [], step = (arr.length - 1) / 199;
+    for (let i = 0; i < 200; i++) out.push(arr[Math.round(i * step)]);
+    arr = out;
+  }
+  const bytes = [];
+  const y0 = clamp(Math.round(arr[0].y), 0, 65535);
+  const x0 = Math.round(clamp(arr[0].x, 0, W) / W * 1023);
+  bytes.push(y0 >> 8, y0 & 255, x0 >> 2, (x0 & 3) << 6);
+  let prevY = arr[0].y;
+  for (let i = 1; i < arr.length; i++) {
+    const xq = Math.round(clamp(arr[i].x, 0, W) / W * 1023);
+    let dy = Math.round(arr[i].y - prevY);
+    prevY = arr[i].y;
+    dy = clamp(dy, 0, 1023);
+    const v = (xq << 10) | dy;
+    bytes.push((v >> 12) & 255, (v >> 4) & 255, (v & 15) << 4);
+  }
+  return b64urlEncode(bytes);
+}
+function decodeGhost(str) {
+  if (!str) return [];
+  const bytes = b64urlDecode(str);
+  if (bytes.length < 4) return [];
+  const y0 = (bytes[0] << 8) | bytes[1];
+  const x0 = ((bytes[2] << 2) | (bytes[3] >> 6));
+  const out = [{ x: x0 / 1023 * W, y: y0 }];
+  let prevY = y0;
+  for (let i = 4; i + 2 < bytes.length; i += 3) {
+    const v = (bytes[i] << 12) | (bytes[i + 1] << 4) | (bytes[i + 2] >> 4);
+    const xq = (v >> 10) & 1023, dy = v & 1023;
+    prevY += dy;
+    out.push({ x: xq / 1023 * W, y: prevY });
+  }
+  return out;
+}
+function drawGhostBall() {
+  if (mode !== 'invite' || !ghostSamples.length || !inviteTime) return;
+  const p = clamp(raceTime / inviteTime, 0, 1) * (ghostSamples.length - 1);
+  const i0 = Math.floor(p), i1 = Math.min(ghostSamples.length - 1, i0 + 1);
+  const k = p - i0;
+  const x = lerp(ghostSamples[i0].x, ghostSamples[i1].x, k);
+  const y = lerp(ghostSamples[i0].y, ghostSamples[i1].y, k);
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#6cd0ff';
+  ctx.shadowColor = '#6cd0ff'; ctx.shadowBlur = 16;
+  ctx.beginPath(); ctx.arc(x, y, R * 0.92, 0, TAU); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(200,240,255,0.9)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, R * 0.92, 0, TAU); ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillStyle = '#cfefff';
+  ctx.textAlign = 'center';
+  ctx.fillText('好友', x, y - R - 8);
+  ctx.restore();
+}
 let rankFrom = 'menu';
 let simTime = 0, raceTime = 0, countdownT = 0, goT = -99, lastCount = 99;
 let seed = (Math.random() * 1e9) | 0, lenKey = 'medium', diffKey = 'normal';
@@ -853,8 +949,7 @@ function bestText() {
     return '第 ' + currentLevel + ' 关最佳：' + (b ? fmtT(+b) : '--:--.-');
   }
   if (mode === 'invite') return inviteTime ? '好友成绩：' + fmtT(inviteTime) : '邀请好友，同赛道比时间';
-  const v = store.get(bestKey(), 0);
-  return '最佳（' + LENGTHS[lenKey].label + '·' + AILVLS[diffKey].label + '）：' + (v ? fmtT(+v) : '--:--.-');
+  return '全 AI 观赛模式 · 不计成绩';
 }
 let resultsVisible = false;
 let resTitleText = '完赛！';
@@ -867,10 +962,13 @@ function startRace(newSeed) {
   trackLen = mode === 'level' ? levelConfig(currentLevel).len : LENGTHS[lenKey].len;
   track = genTrack(seed, activeDiff().scale, trackLen);
   balls = makeBalls();
+  ghostRecord = mode === 'invite' && players[0] ? [{ x: players[0].x, y: players[0].y }] : [];
+  ghostRecT = 0;
   raceTime = 0; countdownT = 3.0; lastCount = 99; goT = -99;
   state = 'countdown'; paused = false; resultsFinal = false;
   settingsOpen = false; resultsVisible = false; backPrompt = false;
   screen = 'menu';
+  ghostRecord = []; ghostRecT = 0;
   btnPresses.clear(); syncBtnState();
   for (const j of joys) { j.pid = null; j.dx = j.dy = j.x = j.y = 0; }
   particles.length = 0;
@@ -926,6 +1024,7 @@ function renderResults(final) {
       const p = players[0];
       const t = p.finished ? p.finishTime : 0;
       inviteLastTime = t || inviteLastTime;
+      inviteGhostStr = encodeGhost(ghostRecord);
       if (inviteTime > 0 && t > 0) {
         const diff = Math.abs(t - inviteTime);
         if (t < inviteTime) {
@@ -1024,6 +1123,7 @@ function drawWorld(yTop, yBot) {
     ctx.globalAlpha = 1;
   }
   for (const b of balls) { if (b.y < yTop - 60 || b.y > yBot + 60) continue; drawBall(b); }
+  drawGhostBall();
   for (const p of particles) {
     ctx.globalAlpha = Math.max(0, p.life / p.ttl);
     ctx.fillStyle = p.color;
@@ -1451,9 +1551,9 @@ function drawMenuUI() {
   const bx0 = px + 16, bwAll = pw - 32;
   // 模式
   textCentered('模 式', cx, 212, '11px sans-serif', '#7e97c4');
-  const modes = [['solo', '单人'], ['level', '关卡'], ['invite', '邀请'], ['spectate', '观赛']];
-  const mw = (bwAll - 18) / 4;
-  modes.forEach((m, i) => uiButton(bx0 + i * (mw + 6), 222, mw, 34, m[1], mode === m[0], 'mode', m[0], { font: 13 }));
+  const modes = [['level', '关卡'], ['invite', '邀请'], ['spectate', '观赛']];
+  const mw = (bwAll - 12) / 3;
+  modes.forEach((m, i) => uiButton(bx0 + i * (mw + 6), 222, mw, 34, m[1], mode === m[0], 'mode', m[0], { font: 14 }));
 
   if (mode === 'level') {
     const cleared = Object.keys(levelProgress.best).length;
@@ -1640,8 +1740,9 @@ function drawInviteUI() {
 
   textCentered('当前配置：' + LENGTHS[lenKey].label + ' · ' + AILVLS[diffKey].label + ' · ' + ballCount + ' 颗球',
     cx, 176, '12px sans-serif', '#ffe9a8');
-  if (inviteTime > 0) textCentered('好友成绩：' + fmtT(inviteTime), cx, 200, '12px sans-serif', '#6cd0ff');
-  else if (inviteLastTime > 0) textCentered('我的成绩：' + fmtT(inviteLastTime), cx, 200, '12px sans-serif', '#6cd0ff');
+  if (inviteTime > 0) textCentered('好友成绩：' + fmtT(inviteTime), cx, 196, '12px sans-serif', '#6cd0ff');
+  else if (inviteLastTime > 0) textCentered('我的成绩：' + fmtT(inviteLastTime), cx, 196, '12px sans-serif', '#6cd0ff');
+  if (ghostSamples.length) textCentered('好友幽灵已就位 · 比赛中会和它一起跑', cx, 214, '11px sans-serif', '#7ec9a9');
 
   uiButton(cx - 150, 220, 300, 50, '开始挑战 ▶', true, 'start-invite', null, { bold: true, font: 17, radius: 12 });
   uiButton(cx - 150, 282, 300, 44, '分享邀请卡给好友', false, 'share-invite', null, { radius: 10, font: 14 });
@@ -1741,7 +1842,7 @@ function drawSettingsUI() {
 /* ================= 触控 ================= */
 function joySlots() {
   if (state === 'menu' || paused || backPrompt || settingsOpen || resultsVisible) return [];
-  if (mode === 'solo' || mode === 'level' || mode === 'invite') return [0];
+  if (mode === 'level' || mode === 'invite') return [0];
   return [];
 }
 function joyBase(i) { return i === 0 ? [116, ch - 128] : [cw - 116, ch - 128]; }
@@ -1763,7 +1864,7 @@ function joyMove(j, x, y) {
 function btnSlots() {
   if (settings.ctrl !== 'btn') return false;
   if (state === 'menu' || paused || backPrompt || settingsOpen || resultsVisible) return false;
-  return mode === 'solo' || mode === 'level' || mode === 'invite';
+  return mode === 'level' || mode === 'invite';
 }
 function btnLayout() {
   const r = cw < 430 ? 46 : 54, cy = ch - (r + 66);
@@ -1835,7 +1936,7 @@ function handleUIHit(h, x, y) {
     case 'open-invite': enterInvite(); return true;
     case 'start-invite': startInviteRace(); return true;
     case 'share-invite': shareChallenge(); return true;
-    case 'new-invite': inviteSeed = (Math.random() * 1e9) | 0; inviteTime = 0; inviteLastTime = 0; return true;
+    case 'new-invite': inviteSeed = (Math.random() * 1e9) | 0; inviteTime = 0; inviteLastTime = 0; ghostSamples = []; inviteGhostStr = ''; return true;
     case 'invite-back': screen = 'menu'; return true;
     case 'open-rank': rankFrom = screen; enterRank(); return true;
     case 'rank-back':
@@ -1983,6 +2084,13 @@ function frame(ts) {
     } else if (state === 'race' || state === 'finishing') {
       raceTime += dt;
       physics(dt / 2); physics(dt / 2);
+      if (mode === 'invite' && !players[0].finished) {
+        ghostRecT += dt;
+        if (ghostRecT >= 0.5) {
+          ghostRecT -= 0.5;
+          ghostRecord.push({ x: players[0].x, y: players[0].y });
+        }
+      }
       if (state === 'finishing') {
         if (mode !== 'spectate' && raceTime - lastResUpdate > 0.25) { renderResults(false); lastResUpdate = raceTime; }
         const done = mode === 'spectate' ? balls.every(x => x.finished) : players.every(p => p.finished);
