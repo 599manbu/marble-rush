@@ -1365,7 +1365,8 @@ function drawMenuUI() {
   ctx.textBaseline = 'alphabetic';
   pushHit(sbx, sby, sbw, 52, 'start');
 
-  uiButton(cx - 65, 628, 130, 34, '设置', false, 'open-settings', null, { font: 14 });
+  uiButton(cx - 136, 628, 130, 34, '设置', false, 'open-settings', null, { font: 14 });
+  uiButton(cx + 6, 628, 130, 34, '分享好友', false, 'share', null, { font: 14 });
 
   textCentered(bestText(), cx, 686, '12px sans-serif', '#7e97c4');
   textCentered('手机操作：左下摇杆转向（上推刹车）· 双人模式右摇杆为 P2', cx, 716, '11px sans-serif', '#66809f');
@@ -1544,6 +1545,7 @@ function handleUIHit(h, x, y) {
     case 'ctrl': settings.ctrl = h.data; btnPresses.clear(); syncBtnState(); saveSettings(); return true;
     case 'mute': settings.mute = !settings.mute; muted = settings.mute; saveSettings(); if (!settings.mute) { ensureAudio(); sndBeep(); } return true;
     case 'test': ensureAudio(); sndBeep(); return true;
+    case 'share': doShare(); return true;
     case 'close': settingsOpen = false; return true;
     case 'volume': updateVolume(x); sliderDragId = -1; return true;
     case 'back': backPrompt = true; return true;
@@ -1681,9 +1683,44 @@ function frame(ts) {
   render();
 }
 
+/* ================= 分享 ================= */
+function setupShare() {
+  try {
+    wx.showShareMenu({
+      withShareTicket: true,
+      menus: ['shareAppMessage', 'shareTimeline'],
+      fail(e) { try { console.log('showShareMenu fail', e); } catch (err) {} },
+    });
+  } catch (e) { /* 低版本忽略 */ }
+  if (wx.onShareAppMessage) {
+    wx.onShareAppMessage(() => ({
+      title: '赛球弹珠竞速 · 来和我比一场',
+      imageUrl: 'images/share.png',
+      query: 'from=card',
+    }));
+  }
+  if (wx.onShareTimeline) {
+    wx.onShareTimeline(() => ({
+      title: '赛球弹珠竞速 · 来和我比一场',
+      imageUrl: 'images/share.png',
+      query: 'from=timeline',
+    }));
+  }
+}
+function doShare() {
+  try {
+    wx.shareAppMessage({
+      title: '赛球弹珠竞速 · 来和我比一场',
+      imageUrl: 'images/share.png',
+      query: 'from=button',
+    });
+  } catch (e) { /* 非用户点击等场景会失败 */ }
+}
+
 /* ================= 启动 ================= */
 loadRoster();
 loadSettings();
+setupShare();
 track = genTrack(seed, AILVLS[diffKey].scale, trackLen);
 balls = makeBalls();
 requestAnimationFrame(frame);
