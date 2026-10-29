@@ -137,10 +137,84 @@ const AILVLS = {
   nightmare: { label: '噩梦', scale: 1.00, spd: 1.20, ai: [0.97, 0.98, 0.985, 0.99, 0.995] },
 };
 
+/* ================= 关卡模式（50 关，难度从噩梦起步递增） ================= */
+const MAX_LEVEL = 50;
+function levelConfig(lv) {
+  const t = (clamp(lv, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1);   // 0..1
+  return {
+    label: '第 ' + lv + ' 关',
+    scale: 1.0 + t * 0.35,          // 机关密度超过噩梦
+    spd: 1.20 + t * 0.20,           // 人机速度递增
+    ai: [0.970 + t * 0.020, 0.980 + t * 0.016, 0.985 + t * 0.013, 0.990 + t * 0.009, 0.995 + t * 0.004],
+    len: Math.round(lerp(20000, 27000, t)),   // 约 1 分钟赛道
+    level: lv,
+  };
+}
+function activeDiff() {
+  return mode === 'level' ? levelConfig(currentLevel) : AILVLS[diffKey];
+}
+function loadLevels() {
+  const p = store.get('marbleLevels', null);
+  if (p && typeof p === 'object') {
+    levelProgress.unlocked = clamp(+p.unlocked || 1, 1, MAX_LEVEL);
+    levelProgress.best = (p.best && typeof p.best === 'object') ? p.best : {};
+  }
+}
+function saveLevels() { store.set('marbleLevels', levelProgress); }
+
+/* ================= 邀请好友（同赛道异步对战） ================= */
+function parseInvite(query) {
+  if (!query || !query.seed) return false;
+  const s = +query.seed;
+  if (!s) return false;
+  inviteSeed = s;
+  if (query.len && LENGTHS[query.len]) lenKey = query.len;
+  if (query.ai && AILVLS[query.ai]) diffKey = query.ai;
+  if (query.c) ballCount = clamp(+query.c, 1, 10);
+  inviteTime = +query.t || 0;
+  inviteLastTime = 0;
+  inviteFrom = query.from || '';
+  mode = 'invite';
+  screen = 'invite';
+  return true;
+}
+function enterInvite() {
+  mode = 'invite';
+  if (!inviteSeed) inviteSeed = (Math.random() * 1e9) | 0;
+  inviteLastTime = 0;
+  inviteTime = 0;
+  screen = 'invite';
+}
+function shareChallenge() {
+  if (!inviteSeed) inviteSeed = (Math.random() * 1e9) | 0;
+  const q = 'seed=' + inviteSeed + '&len=' + lenKey + '&ai=' + diffKey + '&c=' + ballCount +
+            '&t=' + (inviteLastTime ? Math.round(inviteLastTime * 100) / 100 : '') + '&from=invite';
+  try {
+    wx.shareAppMessage({
+      title: inviteLastTime
+        ? '我在赛球弹珠竞速跑出 ' + fmtT(inviteLastTime) + '，来同一条赛道挑战我！'
+        : '赛球弹珠竞速 · 同一条赛道，来和我比时间！',
+      imageUrl: 'images/share.png',
+      query: q,
+    });
+  } catch (e) { /* 忽略 */ }
+}
+function startInviteRace() {
+  if (!inviteSeed) inviteSeed = (Math.random() * 1e9) | 0;
+  screen = 'menu';
+  startRace(false);
+}
+
 /* ================= 全局状态 ================= */
 let state = 'menu';
 let paused = false;
-let mode = '1p';
+let mode = 'solo';               // solo | level | invite | spectate
+let screen = 'menu';             // menu | levels | invite
+let currentLevel = 1;
+let levelProgress = { unlocked: 1, best: {} };
+let levelPage = 0;
+let inviteSeed = 0, inviteTime = 0, inviteLastTime = 0;
+let inviteFrom = '';
 let simTime = 0, raceTime = 0, countdownT = 0, goT = -99, lastCount = 99;
 let seed = (Math.random() * 1e9) | 0, lenKey = 'medium', diffKey = 'normal';
 let trackLen = LENGTHS.medium.len;
@@ -257,7 +331,7 @@ function genTrack(sd, scaleD, len) {
   const out = [];
   const pick = arr => { let s = 0; for (const a of arr) s += a[1]; let r = rng() * s; for (const a of arr) { r -= a[1]; if (r <= 0) return a[0]; } return arr[0][0]; };
   let y = 560;
-  const d = Math.min(scaleD, 1);
+  const d = Math.min(scaleD, 1.35);
   let lastKind = '';
   while (y < len - 650) {
     let kind = pick([['gate', 0.9], ['slalom', 0.9], ['pinball', 0.9], ['windmill', 1], ['funnel', 0.65],
@@ -297,6 +371,7 @@ function ensureKin(o) {
     const reach = o.min + o.amp * k;
     o._vx = o.amp * 0.5 * o.speed * Math.cos(ph) * (o.side === 'L' ? 1 : -1);
     o._rect = o.side === 'L' ? { x: WALL, y: o.y, w: reach, h: o.h } : { x: W - WALL - reach, y: o.y, w: reach, h: o.h };
+    o._rect._owner = o;
   }
 }
 function obsWindow(y0, y1) {
@@ -320,7 +395,7 @@ function rotNearest(o, px, py) {
 /* ================= 弹珠 ================= */
 function makeBalls() {
   const jr = mulberry32(seed ^ 0x5f3759df);
-  const n = mode === '2p' ? Math.max(2, ballCount) : Math.max(1, ballCount);
+  const n = Math.max(1, ballCount);
   const roster = BALL_POOL.map((e, i) => ({ name: customNames[i].trim() || e.name, color: e.color }));
   players = [];
   balls = [];
@@ -330,10 +405,8 @@ function makeBalls() {
     players = [balls[0]];
     return balls;
   }
-  const arr = AILVLS[diffKey].ai, lo = arr[0], hi = arr[arr.length - 1];
-  const pSlots = mode === '2p'
-    ? [Math.round((n - 1) * 0.3), Math.round((n - 1) * 0.7)]
-    : [Math.floor((n - 1) / 2)];
+  const arr = activeDiff().ai, lo = arr[0], hi = arr[arr.length - 1];
+  const pSlots = [Math.floor((n - 1) / 2)];
   const aiDefs = roster.slice(pSlots.length);
   let ai = 0;
   for (let i = 0; i < n; i++) {
@@ -378,6 +451,7 @@ function resolveCircleRect(b, rect, vpx, vpy) {
     const e = 0.22;
     b.vx = rvx - (1 + e) * vn * nx + (vpx || 0);
     b.vy = rvy - (1 + e) * vn * ny + (vpy || 0);
+    noteHit(b, rect._owner || rect);
     if (-vn > 150) onImpact(b, -vn);
   }
 }
@@ -397,6 +471,7 @@ function resolveRot(b, o) {
     const e = 0.30;
     b.vx = rvx - (1 + e) * vn * nx + svx;
     b.vy = rvy - (1 + e) * vn * ny + svy;
+    noteHit(b, o);
     if (-vn > 150) onImpact(b, -vn);
   }
 }
@@ -408,6 +483,7 @@ function resolveCircleObst(b, o) {
   b.x += nx * (rr - d); b.y += ny * (rr - d);
   const vn = b.vx * nx + b.vy * ny;
   if (vn < 0) {
+    noteHit(b, o);
     const e = o.type === 'bumper' ? 0.75 : 0.4;
     b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny;
     if (o.type === 'bumper') {
@@ -416,6 +492,14 @@ function resolveCircleObst(b, o) {
       spawnSparks(b.x, b.y, 6, '#ff9d9d');
     } else if (-vn > 200) onImpact(b, -vn);
   }
+}
+// 记录 AI 是否反复撞同一个障碍物（用于脱困）
+function noteHit(b, o) {
+  if (b.isPlayer || !o) return;
+  if (b._lastObj === o && simTime - (b._lastHitT || -9) < 0.6) return;
+  if (b._lastObj === o) b._hitN = (b._hitN || 0) + 1;
+  else { b._hitN = 1; b._lastObj = o; }
+  b._lastHitT = simTime;
 }
 function onImpact(b, imp) {
   if (imp > 420) spawnSparks(b.x, b.y, Math.min(10, imp / 90 | 0), '#ffe9a8');
@@ -513,7 +597,7 @@ function rowIntervals(row, L, Rt) {
   return ivs;
 }
 function aiForce(b) {
-  const P = AILVLS[diffKey];
+  const P = activeDiff();
   let fx = Math.sin(simTime * b.wf + b.phase) * b.wa * 0.5;
   let fy = GY * (P.spd - 0.06 + 0.10 * b.skill);
   const look = 280 + 560 * b.skill;
@@ -562,6 +646,14 @@ function aiForce(b) {
     if (dy > -10 && dy < 130 && Math.abs(dx) < 56)
       fx += (dx >= 0 ? -1 : 1) * 260 * (1 - dy / 130);
   }
+  // 反复撞同一个障碍物：向侧方强力脱困
+  if (b._lastObj && (b._hitN || 0) >= 2 && simTime - (b._lastHitT || -9) < 1.2) {
+    const o = b._lastObj;
+    const ocx = (o.cx !== undefined) ? o.cx : (o.x + (o.w || 0) / 2);
+    const dir = b.x >= ocx ? 1 : -1;
+    fx += dir * 950;
+    fy *= 0.92;
+  }
   if (!rows.length) fx += clamp((W / 2 - b.x) * 1.2, -180, 180);
   const m = 80;
   if (b.x < WALL + m) fx += (1 - (b.x - WALL) / m) * 520;
@@ -582,7 +674,6 @@ function syncBtnState() {
   for (const pr of btnPresses.values()) btnState[pr.p][pr.key] = 1;
 }
 function effKeys(b) {
-  if (mode === '2p') return b.pi === 0 ? keys1 : keys2;
   return { left: keys1.left | keys2.left, right: keys1.right | keys2.right,
     up: keys1.up | keys2.up, down: keys1.down | keys2.down };
 }
@@ -605,7 +696,7 @@ function physics(dt) {
     if (!b.finished) {
       if (b.isPlayer) {
         const k = effKeys(b);
-        const pi = mode === '2p' && b.pi === 1 ? 1 : 0;
+        const pi = 0;
         const j = joys[pi];
         let sx = (k.right - k.left);
         let brake = k.up;
@@ -641,11 +732,11 @@ function physics(dt) {
                 const ang = Math.random() * TAU;
                 const nx = clamp(b.x + Math.cos(ang) * dist, WALL + R + 4, W - WALL - R - 4);
                 const ny = b.y + Math.sin(ang) * dist;
-                if (ny > b.y - 40 && spotFree(nx, ny)) { found = [nx, ny]; break search; }
+                if (ny > b.y + 40 && spotFree(nx, ny)) { found = [nx, ny]; break search; }
               }
             }
             if (found) { b.x = found[0]; b.y = found[1]; b.vx = 0; b.vy = 140; b.trail.length = 0; }
-            else { b.y += 160; b.vy = 140; b.vx *= 0.3; }
+            else { b.y += 260; b.vy = 140; b.vx *= 0.3; }
             b.stuck2 = 0;
           } else { b.vy += 320; b.vx += (Math.random() - 0.5) * 300; }
         } else b.stuck2 = Math.max(0, b.stuck2 - 1);
@@ -738,6 +829,11 @@ function standings() {
 /* ================= 流程控制 ================= */
 function bestKey() { return 'marbleBest_' + lenKey + '_' + diffKey; }
 function bestText() {
+  if (mode === 'level') {
+    const b = levelProgress.best[currentLevel];
+    return '第 ' + currentLevel + ' 关最佳：' + (b ? fmtT(+b) : '--:--.-');
+  }
+  if (mode === 'invite') return inviteTime ? '好友成绩：' + fmtT(inviteTime) : '邀请好友，同赛道比时间';
   const v = store.get(bestKey(), 0);
   return '最佳（' + LENGTHS[lenKey].label + '·' + AILVLS[diffKey].label + '）：' + (v ? fmtT(+v) : '--:--.-');
 }
@@ -747,13 +843,15 @@ let resNoteText = '';
 
 function startRace(newSeed) {
   ensureAudio();
-  if (newSeed) seed = (Math.random() * 1e9) | 0;
-  trackLen = LENGTHS[lenKey].len;
-  track = genTrack(seed, AILVLS[diffKey].scale, trackLen);
+  if (mode === 'invite' && inviteSeed) seed = inviteSeed;
+  else if (newSeed) seed = (Math.random() * 1e9) | 0;
+  trackLen = mode === 'level' ? levelConfig(currentLevel).len : LENGTHS[lenKey].len;
+  track = genTrack(seed, activeDiff().scale, trackLen);
   balls = makeBalls();
   raceTime = 0; countdownT = 3.0; lastCount = 99; goT = -99;
   state = 'countdown'; paused = false; resultsFinal = false;
   settingsOpen = false; resultsVisible = false; backPrompt = false;
+  screen = 'menu';
   btnPresses.clear(); syncBtnState();
   for (const j of joys) { j.pid = null; j.dx = j.dy = j.x = j.y = 0; }
   particles.length = 0;
@@ -761,6 +859,7 @@ function startRace(newSeed) {
 function goMenu() {
   state = 'menu'; paused = false; backPrompt = false;
   settingsOpen = false; resultsVisible = false;
+  screen = 'menu';
   btnPresses.clear(); syncBtnState();
   particles.length = 0;
 }
@@ -786,10 +885,40 @@ function renderResults(final) {
     if (mode === 'spectate') {
       resTitleText = '🏆 ' + winner.name + ' 夺冠！';
       resNoteText = '再来一局重新观赛，或换一条新赛道。';
-    } else if (mode === '2p') {
-      resTitleText = winner.isPlayer ? '🏆 ' + winner.name + ' 冠军！' : '完赛！';
-      resNoteText = players.map(p => p.name + ' 第 ' + (st.indexOf(p) + 1) + ' 名').join(' · ');
-      if (winner.isPlayer) resNoteText += ' —— 你们击败了所有 人机！';
+    } else if (mode === 'level') {
+      const p = players[0];
+      const rank = st.indexOf(p) + 1;
+      if (rank === 1) {
+        resTitleText = '🏆 第 ' + currentLevel + ' 关通过！';
+        const prev = levelProgress.best[currentLevel];
+        if (!prev || p.finishTime < prev) levelProgress.best[currentLevel] = p.finishTime;
+        if (currentLevel < MAX_LEVEL && levelProgress.unlocked < currentLevel + 1)
+          levelProgress.unlocked = currentLevel + 1;
+        saveLevels();
+        resNoteText = currentLevel >= MAX_LEVEL
+          ? '全部 50 关通关，恭喜！用时 ' + fmtT(p.finishTime)
+          : '用时 ' + fmtT(p.finishTime) + '，已解锁第 ' + (currentLevel + 1) + ' 关';
+      } else {
+        resTitleText = '挑战失败';
+        resNoteText = '第 ' + currentLevel + ' 关需要拿到第 1 名才能解锁下一关，再试一次吧！';
+      }
+    } else if (mode === 'invite') {
+      const p = players[0];
+      const t = p.finished ? p.finishTime : 0;
+      inviteLastTime = t || inviteLastTime;
+      if (inviteTime > 0 && t > 0) {
+        const diff = Math.abs(t - inviteTime);
+        if (t < inviteTime) {
+          resTitleText = '🏆 你赢了！';
+          resNoteText = '你的用时 ' + fmtT(t) + '，好友用时 ' + fmtT(inviteTime) + '，快了 ' + fmtT(diff);
+        } else {
+          resTitleText = '惜败！';
+          resNoteText = '你的用时 ' + fmtT(t) + '，好友用时 ' + fmtT(inviteTime) + '，慢了 ' + fmtT(diff);
+        }
+      } else {
+        resTitleText = '挑战完成';
+        resNoteText = t > 0 ? '用时 ' + fmtT(t) + '，把成绩分享给好友一起比一比吧！' : '再来一局试试。';
+      }
     } else {
       resTitleText = winner.isPlayer ? '🏆 冠军！' : '完赛！';
       const r = st.indexOf(players[0]) + 1;
@@ -1068,9 +1197,9 @@ function drawViewHUD(p, vx, vy, vw, vh, sIdx) {
   sIdx = sIdx || 0;
   const st = standings();
   const rank = st.indexOf(p) + 1;
-  if (mode === '2p' || (mode === 'spectate' && spectateSplit)) {
-    const isSp = mode === 'spectate';
-    const active = !isSp || sIdx === 1;
+  if (mode === 'spectate' && spectateSplit) {
+    const isSp = true;
+    const active = sIdx === 1;
     ctx.fillStyle = 'rgba(8,14,28,0.66)';
     pathRoundRect(vx + 10, vy + 44, isSp ? 236 : 178, 56, 10); ctx.fill();
     ctx.strokeStyle = isSp && active ? 'rgba(255,213,74,0.85)' : 'rgba(90,130,200,0.35)';
@@ -1302,21 +1431,29 @@ function drawMenuUI() {
   const bx0 = px + 16, bwAll = pw - 32;
   // 模式
   textCentered('模 式', cx, 212, '11px sans-serif', '#7e97c4');
-  const modes = [['1p', '单人'], ['2p', '双人 · 分屏'], ['spectate', '全AI观赛']];
-  const mw = (bwAll - 12) / 3;
-  modes.forEach((m, i) => uiButton(bx0 + i * (mw + 6), 222, mw, 34, m[1], mode === m[0], 'mode', m[0]));
+  const modes = [['solo', '单人'], ['level', '关卡'], ['invite', '邀请'], ['spectate', '观赛']];
+  const mw = (bwAll - 18) / 4;
+  modes.forEach((m, i) => uiButton(bx0 + i * (mw + 6), 222, mw, 34, m[1], mode === m[0], 'mode', m[0], { font: 13 }));
 
-  // 赛道长度
-  textCentered('赛道长度', cx, 282, '11px sans-serif', '#7e97c4');
-  const lens = [['short', '短 ≈40秒'], ['medium', '中 ≈1分30'], ['long', '长 ≈2分钟'], ['xl', '超长 ≈3分钟']];
-  const lw = (bwAll - 18) / 4;
-  lens.forEach((l, i) => uiButton(bx0 + i * (lw + 6), 292, lw, 32, l[1], lenKey === l[0], 'len', l[0], { font: 12 }));
+  if (mode === 'level') {
+    const cleared = Object.keys(levelProgress.best).length;
+    textCentered('关卡模式 · 难度从噩梦起步，逐关递增', cx, 286, '11px sans-serif', '#7e97c4');
+    textCentered('已解锁第 ' + levelProgress.unlocked + ' 关 · 已通关 ' + cleared + ' / ' + MAX_LEVEL,
+      cx, 310, '12px sans-serif', '#ffe9a8');
+    uiButton(cx - 120, 326, 240, 34, '选择关卡（第 ' + currentLevel + ' 关）', true, 'open-levels', null, { font: 13 });
+  } else {
+    // 赛道长度
+    textCentered('赛道长度', cx, 282, '11px sans-serif', '#7e97c4');
+    const lens = [['short', '短 ≈40秒'], ['medium', '中 ≈1分30'], ['long', '长 ≈2分钟'], ['xl', '超长 ≈3分钟']];
+    const lw = (bwAll - 18) / 4;
+    lens.forEach((l, i) => uiButton(bx0 + i * (lw + 6), 292, lw, 32, l[1], lenKey === l[0], 'len', l[0], { font: 12 }));
 
-  // AI 难度
-  textCentered('AI 难度（人机强度 · 机关密度）', cx, 346, '11px sans-serif', '#7e97c4');
-  const ais = [['easy', '简单'], ['normal', '普通'], ['hard', '困难'], ['nightmare', '噩梦']];
-  const aw = (bwAll - 18) / 4;
-  ais.forEach((a, i) => uiButton(bx0 + i * (aw + 6), 356, aw, 32, a[1], diffKey === a[0], 'ai', a[0], { font: 12 }));
+    // AI 难度
+    textCentered('AI 难度（人机强度 · 机关密度）', cx, 346, '11px sans-serif', '#7e97c4');
+    const ais = [['easy', '简单'], ['normal', '普通'], ['hard', '困难'], ['nightmare', '噩梦']];
+    const aw = (bwAll - 18) / 4;
+    ais.forEach((a, i) => uiButton(bx0 + i * (aw + 6), 356, aw, 32, a[1], diffKey === a[0], 'ai', a[0], { font: 12 }));
+  }
 
   // 小球数量
   textCentered('小球数量（1-10，颜色各不相同）', cx, 410, '11px sans-serif', '#7e97c4');
@@ -1361,18 +1498,88 @@ function drawMenuUI() {
   fillRoundRect(sbx, sby, sbw, 52, 12, sg);
   ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#08111f';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('开始比赛 ▶', cx, sby + 27);
+  ctx.fillText(mode === 'level' ? '选择关卡 ▶' : mode === 'invite' ? '邀请好友 ▶' : '开始比赛 ▶', cx, sby + 27);
   ctx.textBaseline = 'alphabetic';
-  pushHit(sbx, sby, sbw, 52, 'start');
+  pushHit(sbx, sby, sbw, 52, mode === 'level' ? 'open-levels' : mode === 'invite' ? 'open-invite' : 'start');
 
   uiButton(cx - 136, 628, 130, 34, '设置', false, 'open-settings', null, { font: 14 });
   uiButton(cx + 6, 628, 130, 34, '分享好友', false, 'share', null, { font: 14 });
 
   textCentered(bestText(), cx, 686, '12px sans-serif', '#7e97c4');
-  textCentered('手机操作：左下摇杆转向（上推刹车）· 双人模式右摇杆为 P2', cx, 716, '11px sans-serif', '#66809f');
-  textCentered('比赛中点底部「设置」可切换左右按钮 / 调节音效', cx, 736, '11px sans-serif', '#66809f');
+  textCentered('关卡模式共 50 关，难度从噩梦起步逐关提升', cx, 716, '11px sans-serif', '#66809f');
+  textCentered('邀请模式下双方使用同一条赛道，比谁的用时更短', cx, 736, '11px sans-serif', '#66809f');
   endUILayer();
 }
+/* ---------- 关卡选择界面 ---------- */
+function drawLevelsUI() {
+  ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
+  beginUILayer(440);
+  const px = 14, py = 10, pw = 402, ph = 420;
+  fillRoundRect(px, py, pw, ph, 18, 'rgba(10,17,34,0.96)', '#2b3f6b', 1);
+  const cx = UI_W / 2;
+  ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
+  ctx.fillText('关卡模式', cx, 50);
+  textCentered('难度从噩梦起步，逐关递增 · 每关约 1 分钟', cx, 76, '11px sans-serif', '#8ea6cf');
+
+  const pageCount = Math.ceil(MAX_LEVEL / 10);
+  levelPage = clamp(levelPage, 0, pageCount - 1);
+  textCentered('第 ' + (levelPage + 1) + ' / ' + pageCount + ' 页', cx, 102, '11px sans-serif', '#6cd0ff');
+
+  const cols = 5, gap = 8;
+  const cellW = (pw - 32 - gap * (cols - 1)) / cols;
+  for (let i = 0; i < 10; i++) {
+    const lv = levelPage * 10 + i + 1;
+    if (lv > MAX_LEVEL) break;
+    const r = Math.floor(i / cols), c = i % cols;
+    const x = px + 16 + c * (cellW + gap), y = 116 + r * 84;
+    const unlocked = lv <= levelProgress.unlocked;
+    const best = levelProgress.best[lv];
+    fillRoundRect(x, y, cellW, 76, 10,
+      unlocked ? 'rgba(13,23,48,0.98)' : 'rgba(13,23,48,0.55)',
+      lv === currentLevel ? '#ffd54a' : unlocked ? '#33508a' : '#22314f', lv === currentLevel ? 2 : 1);
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = unlocked ? (lv === currentLevel ? '#ffd54a' : '#e8f0ff') : '#5b6c8c';
+    ctx.fillText(String(lv), x + cellW / 2, y + 32);
+    ctx.font = '9px sans-serif';
+    if (!unlocked) { ctx.fillStyle = '#5b6c8c'; ctx.fillText('未解锁', x + cellW / 2, y + 54); }
+    else if (best) { ctx.fillStyle = '#7ec9a9'; ctx.fillText(fmtT(best), x + cellW / 2, y + 54); }
+    else { ctx.fillStyle = '#9fb6df'; ctx.fillText('可挑战', x + cellW / 2, y + 54); }
+    if (unlocked) pushHit(x, y, cellW, 76, 'level', lv);
+  }
+
+  const bw = 112, by = 292;
+  uiButton(px + 16, by, bw, 34, '上一页', false, 'level-prev', null, { font: 13 });
+  uiButton(px + pw - 16 - bw, by, bw, 34, '下一页', false, 'level-next', null, { font: 13 });
+  uiButton(cx - 70, 342, 140, 40, '返回', false, 'level-back', null, { font: 14 });
+  endUILayer();
+}
+
+/* ---------- 邀请好友界面 ---------- */
+function drawInviteUI() {
+  ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
+  beginUILayer(520);
+  const px = 14, py = 10, pw = 402, ph = 500;
+  fillRoundRect(px, py, pw, ph, 18, 'rgba(10,17,34,0.96)', '#2b3f6b', 1);
+  const cx = UI_W / 2;
+  ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
+  ctx.fillText('邀请好友', cx, 52);
+  textCentered('双方在完全相同的赛道上比用时', cx, 78, '11px sans-serif', '#8ea6cf');
+  wrapText('点击「分享邀请卡」发给好友，对方点开卡片后会自动进入同一条赛道；跑完后把成绩再分享回去，就能比出胜负。',
+    px + 24, 104, pw - 48, 18, '12px sans-serif', '#c3d3ef');
+
+  textCentered('当前配置：' + LENGTHS[lenKey].label + ' · ' + AILVLS[diffKey].label + ' · ' + ballCount + ' 颗球',
+    cx, 176, '12px sans-serif', '#ffe9a8');
+  if (inviteTime > 0) textCentered('好友成绩：' + fmtT(inviteTime), cx, 200, '12px sans-serif', '#6cd0ff');
+  else if (inviteLastTime > 0) textCentered('我的成绩：' + fmtT(inviteLastTime), cx, 200, '12px sans-serif', '#6cd0ff');
+
+  uiButton(cx - 150, 220, 300, 50, '开始挑战 ▶', true, 'start-invite', null, { bold: true, font: 17, radius: 12 });
+  uiButton(cx - 150, 282, 300, 44, '分享邀请卡给好友', false, 'share-invite', null, { radius: 10, font: 14 });
+  uiButton(cx - 150, 334, 300, 36, '换一条新赛道', false, 'new-invite', null, { radius: 10, font: 13 });
+  uiButton(cx - 70, 386, 140, 40, '返回', false, 'invite-back', null, { font: 14 });
+  endUILayer();
+}
+
 function drawResultsUI() {
   ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
   beginUILayer(800);
@@ -1413,8 +1620,11 @@ function drawResultsUI() {
   });
   ctx.textAlign = 'center';
   const by = top + 34 + Math.min(st.length, 10) * rowH + 20;
-  uiButton(px + 40, by, pw - 80, 46, '再来一局', true, 'again', null, { bold: true, font: 17, radius: 12 });
-  uiButton(px + 40, by + 56, pw - 80, 38, '换新赛道', false, 'new', null, { radius: 10 });
+  uiButton(px + 40, by, pw - 80, 46, mode === 'level' ? '再次挑战' : mode === 'invite' ? '再来一次' : '再来一局',
+    true, 'again', null, { bold: true, font: 17, radius: 12 });
+  if (mode === 'level') uiButton(px + 40, by + 56, pw - 80, 38, '选择关卡', false, 'to-levels', null, { radius: 10 });
+  else if (mode === 'invite') uiButton(px + 40, by + 56, pw - 80, 38, '分享成绩', false, 'share-invite', null, { radius: 10 });
+  else uiButton(px + 40, by + 56, pw - 80, 38, '换新赛道', false, 'new', null, { radius: 10 });
   uiButton(px + 40, by + 102, pw - 80, 38, '返回菜单', false, 'menu', null, { radius: 10 });
   endUILayer();
 }
@@ -1461,8 +1671,7 @@ function drawSettingsUI() {
 /* ================= 触控 ================= */
 function joySlots() {
   if (state === 'menu' || paused || backPrompt || settingsOpen || resultsVisible) return [];
-  if (mode === '1p') return [0];
-  if (mode === '2p') return [0, 1];
+  if (mode === 'solo' || mode === 'level' || mode === 'invite') return [0];
   return [];
 }
 function joyBase(i) { return i === 0 ? [116, ch - 128] : [cw - 116, ch - 128]; }
@@ -1483,18 +1692,12 @@ function joyMove(j, x, y) {
 function btnSlots() {
   if (settings.ctrl !== 'btn') return false;
   if (state === 'menu' || paused || backPrompt || settingsOpen || resultsVisible) return false;
-  return mode === '1p' || mode === '2p';
+  return mode === 'solo' || mode === 'level' || mode === 'invite';
 }
 function btnLayout() {
   const r = cw < 430 ? 46 : 54, cy = ch - (r + 66);
-  if (mode !== '2p')
-    return [{ p: 0, key: 'left', x: 88, y: cy, r, icon: '◀' },
-            { p: 0, key: 'right', x: cw - 88, y: cy, r, icon: '▶' }];
-  const g = r * 2.4;
-  return [{ p: 0, key: 'left', x: 72, y: cy, r, icon: '◀' },
-          { p: 0, key: 'right', x: 72 + g, y: cy, r, icon: '▶' },
-          { p: 1, key: 'left', x: cw - 72 - g, y: cy, r, icon: '◀' },
-          { p: 1, key: 'right', x: cw - 72, y: cy, r, icon: '▶' }];
+  return [{ p: 0, key: 'left', x: 88, y: cy, r, icon: '◀' },
+          { p: 0, key: 'right', x: cw - 88, y: cy, r, icon: '▶' }];
 }
 function btnHit(x, y) {
   if (!btnSlots()) return null;
@@ -1533,7 +1736,36 @@ function handleUIHit(h, x, y) {
     case 'ai': diffKey = h.data; return true;
     case 'count': ballCount = h.data; saveRoster(); return true;
     case 'name': editName(h.data); return true;
-    case 'start': startRace(false); return true;
+    case 'start': if (mode === 'invite') startInviteRace(); else startRace(false); return true;
+    case 'open-levels':
+      mode = 'level';
+      screen = 'levels';
+      levelPage = Math.floor((clamp(currentLevel, 1, MAX_LEVEL) - 1) / 10);
+      return true;
+    case 'level':
+      if (h.data <= levelProgress.unlocked) {
+        currentLevel = h.data;
+        mode = 'level';
+        seed = 7919 * currentLevel + 12345;
+        screen = 'menu';
+        startRace(false);
+      }
+      return true;
+    case 'level-prev': levelPage = Math.max(0, levelPage - 1); return true;
+    case 'level-next': levelPage = Math.min(Math.ceil(MAX_LEVEL / 10) - 1, levelPage + 1); return true;
+    case 'level-back': screen = 'menu'; return true;
+    case 'to-levels':
+      resultsVisible = false;
+      state = 'menu';
+      mode = 'level';
+      screen = 'levels';
+      levelPage = Math.floor((currentLevel - 1) / 10);
+      return true;
+    case 'open-invite': enterInvite(); return true;
+    case 'start-invite': startInviteRace(); return true;
+    case 'share-invite': shareChallenge(); return true;
+    case 'new-invite': inviteSeed = (Math.random() * 1e9) | 0; inviteTime = 0; inviteLastTime = 0; return true;
+    case 'invite-back': screen = 'menu'; return true;
     case 'open-settings':
       settingsOpen = true;
       for (const j of joys) { j.pid = null; j.dx = j.dy = j.x = j.y = 0; }
@@ -1621,7 +1853,7 @@ function render() {
   ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, cw, ch);
   if (state === 'menu' || resultsVisible) {
     renderView(0, 0, cw, ch, state === 'menu' ? null : players[0], 0);
-  } else if (mode === '2p' || (mode === 'spectate' && spectateSplit)) {
+  } else if (mode === 'spectate' && spectateSplit) {
     renderView(0, 0, cw / 2 - 2, ch, players[0], 0);
     renderView(cw / 2 + 2, 0, cw / 2 - 2, ch, players[1], 1);
     ctx.fillStyle = '#0a1122'; ctx.fillRect(cw / 2 - 4, 0, 8, ch);
@@ -1638,15 +1870,18 @@ function render() {
   if (state === 'race' && raceTime < 4 && !settingsOpen && !resultsVisible) {
     ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(195,211,239,0.85)';
     ctx.font = '13px sans-serif';
-    const tip = mode === '2p' ? 'P1 左 · P2 右 · 撞开对手抢线！'
-      : mode === 'spectate' ? '点按排名或画面切换视角'
+    const tip = mode === 'spectate' ? '点按排名或画面切换视角'
       : '左右转向 · 上推刹车 · 撞开对手抢线！';
     ctx.fillText(tip, cw / 2, ch - 58);
   }
   if (touchSeen && settings.ctrl !== 'btn' && !settingsOpen && !resultsVisible) drawJoysticks();
   if (btnSlots()) drawButtons();
   if (backPrompt) drawBackPrompt();
-  if (state === 'menu' && !settingsOpen) drawMenuUI();
+  if (state === 'menu' && !settingsOpen) {
+    if (screen === 'levels') drawLevelsUI();
+    else if (screen === 'invite') drawInviteUI();
+    else drawMenuUI();
+  }
   if (resultsVisible && !settingsOpen) drawResultsUI();
   if (settingsOpen) drawSettingsUI();
 }
@@ -1720,8 +1955,22 @@ function doShare() {
 /* ================= 启动 ================= */
 loadRoster();
 loadSettings();
+loadLevels();
 setupShare();
-track = genTrack(seed, AILVLS[diffKey].scale, trackLen);
+try {
+  const lo = wx.getLaunchOptionsSync ? wx.getLaunchOptionsSync() : null;
+  parseInvite(lo && lo.query);
+} catch (e) { /* 忽略 */ }
+if (wx.onShow) {
+  wx.onShow(res => {
+    if (parseInvite(res && res.query)) {
+      state = 'menu'; resultsVisible = false; settingsOpen = false; backPrompt = false;
+      screen = 'invite';
+    }
+  });
+}
+if (mode === 'level') trackLen = levelConfig(currentLevel).len;
+track = genTrack(seed, activeDiff().scale, trackLen);
 balls = makeBalls();
 requestAnimationFrame(frame);
 
