@@ -143,10 +143,10 @@ function levelConfig(lv) {
   const t = (clamp(lv, 1, MAX_LEVEL) - 1) / (MAX_LEVEL - 1);   // 0..1
   return {
     label: '第 ' + lv + ' 关',
-    scale: 1.0 + t * 0.35,          // 机关密度超过噩梦
-    spd: 1.30 + t * 0.30,           // 人机速度：比噩梦更强，逐关递增
-    ai: [0.985 + t * 0.012, 0.990 + t * 0.008, 0.994 + t * 0.005, 0.997 + t * 0.0025, 1.0],
-    len: Math.round(lerp(20000, 27000, t)),   // 约 1 分钟赛道
+    scale: 0.92 + t * 0.43,         // 第 1 关略低于噩梦，第 50 关超过噩梦
+    spd: 1.18 + t * 0.32,           // 人机速度：第 1 关略低于噩梦，逐关提升
+    ai: [0.950 + t * 0.030, 0.960 + t * 0.025, 0.970 + t * 0.020, 0.980 + t * 0.015, 0.988 + t * 0.012],
+    len: Math.round(lerp(19000, 27000, t)),   // 约 1 分钟赛道
     level: lv,
   };
 }
@@ -719,7 +719,7 @@ function aiForce(b) {
   const isLv = mode === 'level';
   const lvT = isLv ? (currentLevel - 1) / (MAX_LEVEL - 1) : 0;
   let fx = Math.sin(simTime * b.wf + b.phase) * b.wa * 0.5;
-  let fy = GY * (P.spd - 0.06 + 0.10 * b.skill) * (isLv ? 1.06 + lvT * 0.06 : 1);
+  let fy = GY * (P.spd - 0.06 + 0.10 * b.skill) * (isLv ? 1.00 + lvT * 0.10 : 1);
   const look = 280 + 560 * b.skill;
   const L = WALL + R + 4, Rt = W - WALL - R - 4;
   const rows = collectRows(b, look);
@@ -753,12 +753,12 @@ function aiForce(b) {
       for (const iv of use[0].ivs) { const w = iv[1] - iv[0]; if (w > wmax) { wmax = w; target = (iv[0] + iv[1]) / 2; } }
       if (target === null) target = W / 2;
     }
-    target = clamp(target + b.laneOff * (0.6 - 0.45 * b.skill) * (isLv ? 0.5 : 1), L + 8, Rt - 8);
-    const steer = (430 + 520 * b.skill) * (isLv ? 1.2 : 1);
+    target = clamp(target + b.laneOff * (0.6 - 0.45 * b.skill) * (isLv ? 0.6 - lvT * 0.1 : 1), L + 8, Rt - 8);
+    const steer = (430 + 520 * b.skill) * (isLv ? 1.05 + lvT * 0.15 : 1);
     fx += clamp((target - b.x) * 9 - b.vx * 1.4, -steer, steer);
     const rowDist = use[0].y - b.y;
     if (rowDist >= 0 && rowDist < 200 && Math.abs(target - b.x) > 140)
-      fy *= lerp(isLv ? 0.72 : 0.55, 0.90, b.skill);
+      fy *= lerp(isLv ? 0.68 + lvT * 0.06 : 0.55, 0.90, b.skill);
   }
   for (const o of balls) {
     if (o === b || o.falling !== null) continue;
