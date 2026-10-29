@@ -144,12 +144,13 @@ function levelConfig(lv) {
   return {
     label: '第 ' + lv + ' 关',
     scale: 1.0 + t * 0.35,          // 机关密度超过噩梦
-    spd: 1.20 + t * 0.20,           // 人机速度递增
-    ai: [0.970 + t * 0.020, 0.980 + t * 0.016, 0.985 + t * 0.013, 0.990 + t * 0.009, 0.995 + t * 0.004],
+    spd: 1.30 + t * 0.30,           // 人机速度：比噩梦更强，逐关递增
+    ai: [0.985 + t * 0.012, 0.990 + t * 0.008, 0.994 + t * 0.005, 0.997 + t * 0.0025, 1.0],
     len: Math.round(lerp(20000, 27000, t)),   // 约 1 分钟赛道
     level: lv,
   };
 }
+const LEVEL_BALLS = 6;   // 关卡模式固定 6 颗球
 function activeDiff() {
   return mode === 'level' ? levelConfig(currentLevel) : AILVLS[diffKey];
 }
@@ -161,6 +162,23 @@ function loadLevels() {
   }
 }
 function saveLevels() { store.set('marbleLevels', levelProgress); }
+// 把关卡进度上传到微信托管数据（好友排行榜用）
+function uploadLevelStats() {
+  const keys = Object.keys(levelProgress.best);
+  const cleared = keys.length;
+  const maxLv = keys.reduce((m, k) => Math.max(m, +k), 0);
+  const t = maxLv ? (levelProgress.best[maxLv] || 0) : 0;
+  try {
+    if (wx.setUserCloudStorage) {
+      wx.setUserCloudStorage({
+        KVDataList: [
+          { key: 'lv', value: String(cleared) },
+          { key: 'time', value: String(Math.round((t || 0) * 100) / 100) },
+        ],
+      });
+    }
+  } catch (e) { /* 未登录/测试号时忽略 */ }
+}
 
 /* ================= 邀请好友（同赛道异步对战） ================= */
 function parseInvite(query) {
@@ -395,7 +413,7 @@ function rotNearest(o, px, py) {
 /* ================= 弹珠 ================= */
 function makeBalls() {
   const jr = mulberry32(seed ^ 0x5f3759df);
-  const n = Math.max(1, ballCount);
+  const n = mode === 'level' ? LEVEL_BALLS : Math.max(1, ballCount);
   const roster = BALL_POOL.map((e, i) => ({ name: customNames[i].trim() || e.name, color: e.color }));
   players = [];
   balls = [];
@@ -598,8 +616,10 @@ function rowIntervals(row, L, Rt) {
 }
 function aiForce(b) {
   const P = activeDiff();
+  const isLv = mode === 'level';
+  const lvT = isLv ? (currentLevel - 1) / (MAX_LEVEL - 1) : 0;
   let fx = Math.sin(simTime * b.wf + b.phase) * b.wa * 0.5;
-  let fy = GY * (P.spd - 0.06 + 0.10 * b.skill);
+  let fy = GY * (P.spd - 0.06 + 0.10 * b.skill) * (isLv ? 1.06 + lvT * 0.06 : 1);
   const look = 280 + 560 * b.skill;
   const L = WALL + R + 4, Rt = W - WALL - R - 4;
   const rows = collectRows(b, look);
@@ -633,12 +653,12 @@ function aiForce(b) {
       for (const iv of use[0].ivs) { const w = iv[1] - iv[0]; if (w > wmax) { wmax = w; target = (iv[0] + iv[1]) / 2; } }
       if (target === null) target = W / 2;
     }
-    target = clamp(target + b.laneOff * (0.6 - 0.45 * b.skill), L + 8, Rt - 8);
-    const steer = 430 + 520 * b.skill;
+    target = clamp(target + b.laneOff * (0.6 - 0.45 * b.skill) * (isLv ? 0.5 : 1), L + 8, Rt - 8);
+    const steer = (430 + 520 * b.skill) * (isLv ? 1.2 : 1);
     fx += clamp((target - b.x) * 9 - b.vx * 1.4, -steer, steer);
     const rowDist = use[0].y - b.y;
     if (rowDist >= 0 && rowDist < 200 && Math.abs(target - b.x) > 140)
-      fy *= lerp(0.55, 0.88, b.skill);
+      fy *= lerp(isLv ? 0.72 : 0.55, 0.90, b.skill);
   }
   for (const o of balls) {
     if (o === b || o.falling !== null) continue;
@@ -895,6 +915,7 @@ function renderResults(final) {
         if (currentLevel < MAX_LEVEL && levelProgress.unlocked < currentLevel + 1)
           levelProgress.unlocked = currentLevel + 1;
         saveLevels();
+        uploadLevelStats();
         resNoteText = currentLevel >= MAX_LEVEL
           ? '全部 50 关通关，恭喜！用时 ' + fmtT(p.finishTime)
           : '用时 ' + fmtT(p.finishTime) + '，已解锁第 ' + (currentLevel + 1) + ' 关';
@@ -1456,29 +1477,35 @@ function drawMenuUI() {
   }
 
   // 小球数量
-  textCentered('小球数量（1-10，颜色各不相同）', cx, 410, '11px sans-serif', '#7e97c4');
-  const step = bwAll / 10;
-  for (let i = 1; i <= 10; i++) {
-    const ccx = bx0 + step * (i - 0.5), ccy = 434;
-    const on = ballCount === i;
-    ctx.beginPath(); ctx.arc(ccx, ccy, 15, 0, TAU);
-    ctx.fillStyle = on ? 'rgba(28,58,110,0.95)' : 'rgba(13,23,48,0.95)';
-    ctx.fill();
-    ctx.strokeStyle = on ? '#6cd0ff' : '#33508a'; ctx.lineWidth = on ? 2 : 1; ctx.stroke();
-    ctx.font = '13px sans-serif'; ctx.fillStyle = on ? '#fff' : '#9fb6df';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(String(i), ccx, ccy + 1);
-    ctx.textBaseline = 'alphabetic';
-    pushHit(ccx - 17, ccy - 17, 34, 34, 'count', i);
+  if (mode === 'level') {
+    textCentered('小球数量', cx, 410, '11px sans-serif', '#7e97c4');
+    textCentered('关卡模式固定 6 颗球', cx, 438, '13px sans-serif', '#ffe9a8');
+  } else {
+    textCentered('小球数量（1-10，颜色各不相同）', cx, 410, '11px sans-serif', '#7e97c4');
+    const step = bwAll / 10;
+    for (let i = 1; i <= 10; i++) {
+      const ccx = bx0 + step * (i - 0.5), ccy = 434;
+      const on = ballCount === i;
+      ctx.beginPath(); ctx.arc(ccx, ccy, 15, 0, TAU);
+      ctx.fillStyle = on ? 'rgba(28,58,110,0.95)' : 'rgba(13,23,48,0.95)';
+      ctx.fill();
+      ctx.strokeStyle = on ? '#6cd0ff' : '#33508a'; ctx.lineWidth = on ? 2 : 1; ctx.stroke();
+      ctx.font = '13px sans-serif'; ctx.fillStyle = on ? '#fff' : '#9fb6df';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(i), ccx, ccy + 1);
+      ctx.textBaseline = 'alphabetic';
+      pushHit(ccx - 17, ccy - 17, 34, 34, 'count', i);
+    }
   }
 
   // 选手命名
   textCentered('选手命名（点击方框改名）', cx, 470, '11px sans-serif', '#7e97c4');
   const cols = 5, cellW = (bwAll - 4 * 6) / cols;
+  const shownCount = mode === 'level' ? LEVEL_BALLS : ballCount;
   for (let i = 0; i < 10; i++) {
     const r = Math.floor(i / cols), c = i % cols;
     const nx = bx0 + c * (cellW + 6), ny = 480 + r * 36;
-    const on = i < ballCount;
+    const on = i < shownCount;
     fillRoundRect(nx, ny, cellW, 30, 8, '#0d1730', '#24365e', 1);
     ctx.globalAlpha = on ? 1 : 0.32;
     ctx.fillStyle = BALL_POOL[i].color;
@@ -1551,7 +1578,49 @@ function drawLevelsUI() {
   const bw = 112, by = 292;
   uiButton(px + 16, by, bw, 34, '上一页', false, 'level-prev', null, { font: 13 });
   uiButton(px + pw - 16 - bw, by, bw, 34, '下一页', false, 'level-next', null, { font: 13 });
-  uiButton(cx - 70, 342, 140, 40, '返回', false, 'level-back', null, { font: 14 });
+  uiButton(px + 16, 342, 140, 40, '好友排行', false, 'open-rank', null, { font: 14 });
+  uiButton(px + pw - 156, 342, 140, 40, '返回', false, 'level-back', null, { font: 14 });
+  endUILayer();
+}
+
+/* ---------- 好友排行榜界面 ---------- */
+function enterRank() {
+  screen = 'rank';
+  try {
+    const oc = wx.getOpenDataContext ? wx.getOpenDataContext() : null;
+    if (!oc) return;
+    const sc = oc.canvas;
+    const w = 764, h = 1040;
+    if (sc.width !== w || sc.height !== h) { sc.width = w; sc.height = h; }
+    oc.postMessage({ type: 'show', width: w, height: h });
+  } catch (e) { /* 测试号可能不支持 */ }
+}
+function drawRankUI() {
+  ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
+  beginUILayer(770);
+  const px = 14, py = 10, pw = 402, ph = 750;
+  fillRoundRect(px, py, pw, ph, 18, 'rgba(10,17,34,0.96)', '#2b3f6b', 1);
+  const cx = UI_W / 2;
+  ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
+  ctx.fillText('好友排行', cx, 54);
+  textCentered('按已通关关卡数排序，同关卡比用时', cx, 80, '11px sans-serif', '#8ea6cf');
+
+  const rx = 24, ry = 100, rw = 382, rh = 520;
+  fillRoundRect(rx, ry, rw, rh, 12, 'rgba(8,14,28,0.6)', '#24365e', 1);
+  let drew = false;
+  try {
+    const oc = wx.getOpenDataContext ? wx.getOpenDataContext() : null;
+    if (oc && oc.canvas && oc.canvas.width > 0) {
+      ctx.drawImage(oc.canvas, rx, ry, rw, rh);
+      drew = true;
+    }
+  } catch (e) { /* 忽略 */ }
+  if (!drew) {
+    textCentered('排行榜需在小游戏真机环境中查看', cx, ry + rh / 2, '12px sans-serif', '#8ea6cf');
+  }
+
+  uiButton(cx - 150, 640, 300, 38, '刷新', false, 'rank-refresh', null, { font: 13 });
+  uiButton(cx - 70, 690, 140, 38, '返回', false, 'rank-back', null, { font: 14 });
   endUILayer();
 }
 
@@ -1766,6 +1835,14 @@ function handleUIHit(h, x, y) {
     case 'share-invite': shareChallenge(); return true;
     case 'new-invite': inviteSeed = (Math.random() * 1e9) | 0; inviteTime = 0; inviteLastTime = 0; return true;
     case 'invite-back': screen = 'menu'; return true;
+    case 'open-rank': enterRank(); return true;
+    case 'rank-back':
+      screen = 'levels';
+      try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'hide' }); } catch (e) {}
+      return true;
+    case 'rank-refresh':
+      try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'refresh' }); } catch (e) {}
+      return true;
     case 'open-settings':
       settingsOpen = true;
       for (const j of joys) { j.pid = null; j.dx = j.dy = j.x = j.y = 0; }
@@ -1880,6 +1957,7 @@ function render() {
   if (state === 'menu' && !settingsOpen) {
     if (screen === 'levels') drawLevelsUI();
     else if (screen === 'invite') drawInviteUI();
+    else if (screen === 'rank') drawRankUI();
     else drawMenuUI();
   }
   if (resultsVisible && !settingsOpen) drawResultsUI();
@@ -1956,6 +2034,7 @@ function doShare() {
 loadRoster();
 loadSettings();
 loadLevels();
+uploadLevelStats();
 setupShare();
 try {
   const lo = wx.getLaunchOptionsSync ? wx.getLaunchOptionsSync() : null;
