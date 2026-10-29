@@ -720,16 +720,14 @@ function physics(dt) {
         const pi = 0;
         const j = joys[pi];
         let sx = (k.right - k.left);
-        let brake = k.up;
         if (settings.ctrl === 'btn') {
           const bs = btnState[pi];
           if (bs.right > bs.left) sx = 1; else if (bs.left > bs.right) sx = -1;
-        } else if (j.pid !== null) {
-          if (Math.abs(j.x) > 0.12) sx = j.x;
-          if (j.y < -0.45) brake = true;
+        } else if (j.pid !== null && Math.abs(j.x) > 0.12) {
+          sx = j.x;
         }
         fx = sx * 820;
-        fy = GY - (brake ? 520 : 0);
+        fy = GY;                       // 无刹车：始终向下加速
       } else { const f = aiForce(b); fx = f[0]; fy = f[1]; }
     } else { fy = GY * 0.25; }
     b.vx += fx * dt; b.vy += fy * dt;
@@ -1717,7 +1715,7 @@ function drawSettingsUI() {
   uiButton(bx0 + bw + 10, py + 152, bw, 40, '左右按钮', settings.ctrl === 'btn', 'ctrl', 'btn');
   const desc = settings.ctrl === 'btn'
     ? '按钮：屏幕下方 ◀=左转、▶=右转，按住即可转向，可左右同时按'
-    : '摇杆：左下角推动转向（推得越满转得越急），上推为刹车';
+    : '摇杆：左下角左右推动转向，推得越满转得越急';
   wrapText(desc, px + 26, py + 222, pw - 52, 17, '11px sans-serif', '#7ec9a9');
 
   textCentered('音效音量', cx, py + 274, '11px sans-serif', '#7e97c4');
@@ -1758,8 +1756,9 @@ function joyMove(j, x, y) {
   const dx = x - j.bx, dy = y - j.by;
   const d = Math.hypot(dx, dy) || 1;
   const cl = Math.min(d, JOY_R);
-  j.dx = dx / d * cl; j.dy = dy / d * cl;
-  j.x = j.dx / JOY_R; j.y = j.dy / JOY_R;
+  j.dx = dx / d * cl;
+  j.dy = 0;                        // 只有左右转向，没有上下刹车
+  j.x = j.dx / JOY_R; j.y = 0;
 }
 function btnSlots() {
   if (settings.ctrl !== 'btn') return false;
@@ -1951,7 +1950,7 @@ function render() {
     ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(195,211,239,0.85)';
     ctx.font = '13px sans-serif';
     const tip = mode === 'spectate' ? '点按排名或画面切换视角'
-      : '左右转向 · 上推刹车 · 撞开对手抢线！';
+      : '左右转向 · 撞开对手抢线！';
     ctx.fillText(tip, cw / 2, ch - 58);
   }
   if (touchSeen && settings.ctrl !== 'btn' && !settingsOpen && !resultsVisible) drawJoysticks();
