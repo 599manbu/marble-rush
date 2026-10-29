@@ -80,7 +80,7 @@ function sndFinish(win) {
 }
 
 /* ================= 设置（本地保存） ================= */
-let settings = { ctrl: 'joy', vol: 0.45, mute: false };
+let settings = { ctrl: 'btn', vol: 0.45, mute: false };
 let settingsOpen = false;
 function loadSettings() {
   const s = store.get('marbleSettings', null);
@@ -233,6 +233,7 @@ let levelProgress = { unlocked: 1, best: {} };
 let levelPage = 0;
 let inviteSeed = 0, inviteTime = 0, inviteLastTime = 0;
 let inviteFrom = '';
+let rankFrom = 'menu';
 let simTime = 0, raceTime = 0, countdownT = 0, goT = -99, lastCount = 99;
 let seed = (Math.random() * 1e9) | 0, lenKey = 'medium', diffKey = 'normal';
 let trackLen = LENGTHS.medium.len;
@@ -1529,12 +1530,14 @@ function drawMenuUI() {
   ctx.textBaseline = 'alphabetic';
   pushHit(sbx, sby, sbw, 52, mode === 'level' ? 'open-levels' : mode === 'invite' ? 'open-invite' : 'start');
 
-  uiButton(cx - 136, 628, 130, 34, '设置', false, 'open-settings', null, { font: 14 });
-  uiButton(cx + 6, 628, 130, 34, '分享好友', false, 'share', null, { font: 14 });
+  const lbw = 118;
+  uiButton(cx - 185, 628, lbw, 34, '设置', false, 'open-settings', null, { font: 13 });
+  uiButton(cx - 59, 628, lbw, 34, '排行榜', false, 'open-rank', null, { font: 13 });
+  uiButton(cx + 67, 628, lbw, 34, '分享好友', false, 'share', null, { font: 13 });
 
   textCentered(bestText(), cx, 686, '12px sans-serif', '#7e97c4');
   textCentered('关卡模式共 50 关，难度从噩梦起步逐关提升', cx, 716, '11px sans-serif', '#66809f');
-  textCentered('邀请模式下双方使用同一条赛道，比谁的用时更短', cx, 736, '11px sans-serif', '#66809f');
+  textCentered('默认左右按钮操作 · 邀请好友同赛道比用时', cx, 736, '11px sans-serif', '#66809f');
   endUILayer();
 }
 /* ---------- 关卡选择界面 ---------- */
@@ -1713,8 +1716,8 @@ function drawSettingsUI() {
   uiButton(bx0, py + 152, bw, 40, '虚拟摇杆', settings.ctrl === 'joy', 'ctrl', 'joy');
   uiButton(bx0 + bw + 10, py + 152, bw, 40, '左右按钮', settings.ctrl === 'btn', 'ctrl', 'btn');
   const desc = settings.ctrl === 'btn'
-    ? '按钮：屏幕下方 ◀=左转（左）、▶=右转（右）；双人模式 P1 在左半边、P2 在右半边'
-    : '摇杆：左下角推动转向（推得越满转得越急），上推刹车；双人模式右下角为 P2';
+    ? '按钮：屏幕下方 ◀=左转、▶=右转，按住即可转向，可左右同时按'
+    : '摇杆：左下角推动转向（推得越满转得越急），上推为刹车';
   wrapText(desc, px + 26, py + 222, pw - 52, 17, '11px sans-serif', '#7ec9a9');
 
   textCentered('音效音量', cx, py + 274, '11px sans-serif', '#7e97c4');
@@ -1835,9 +1838,9 @@ function handleUIHit(h, x, y) {
     case 'share-invite': shareChallenge(); return true;
     case 'new-invite': inviteSeed = (Math.random() * 1e9) | 0; inviteTime = 0; inviteLastTime = 0; return true;
     case 'invite-back': screen = 'menu'; return true;
-    case 'open-rank': enterRank(); return true;
+    case 'open-rank': rankFrom = screen; enterRank(); return true;
     case 'rank-back':
-      screen = 'levels';
+      screen = rankFrom === 'levels' ? 'levels' : 'menu';
       try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'hide' }); } catch (e) {}
       return true;
     case 'rank-refresh':
