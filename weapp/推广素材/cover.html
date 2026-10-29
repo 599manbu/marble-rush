@@ -1,0 +1,35 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;width:650px;height:250px;overflow:hidden;background:#0a1020}
+  .wrap{position:relative;width:650px;height:250px;
+    background:radial-gradient(120% 140% at 18% 8%,#1b2c52 0%,#101a33 55%,#060b18 100%)}
+  .track{position:absolute;left:-10%;top:70%;width:120%;height:74px;transform:rotate(-11deg);
+    background:linear-gradient(90deg,#243a66,#16233f);border-top:3px solid #6cd0ff;border-bottom:3px solid #2a7fb8;
+    box-shadow:0 0 22px rgba(108,208,255,.35)}
+  .track i{position:absolute;top:0;width:2%;height:100%;background:#0d1730;opacity:.55}
+  .ball{position:absolute;left:520px;top:120px;width:92px;height:92px;border-radius:50%;
+    background:radial-gradient(circle at 34% 30%,#fff6cf 0%,#ffd54a 38%,#c98600 100%);
+    box-shadow:0 0 30px rgba(255,213,74,.55)}
+  .ball:after{content:'';position:absolute;left:22%;top:16%;width:26%;height:18%;border-radius:50%;background:#fff;opacity:.75;transform:rotate(-24deg)}
+  .trail{position:absolute;left:398px;top:166px;width:130px;height:20px;border-radius:12px;
+    background:linear-gradient(90deg,rgba(255,213,74,0),rgba(255,213,74,.5));transform:rotate(-10deg);filter:blur(1.5px)}
+  .txt{position:absolute;left:34px;top:36px;right:200px}
+  .t1{font:900 40px/1.1 "Microsoft YaHei",sans-serif;letter-spacing:1px;
+    background:linear-gradient(100deg,#ffd54a,#ff8a5c 55%,#6cd0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .t2{margin-top:12px;font:600 19px/1.4 "Microsoft YaHei",sans-serif;color:#dfe8ff}
+  .t3{margin-top:8px;font:400 15px/1.4 "Microsoft YaHei",sans-serif;color:#9fb6df}
+  .tag{position:absolute;left:34px;bottom:20px;font:600 14px/1 "Microsoft YaHei",sans-serif;color:#7ec9a9;
+    border:1px solid rgba(126,201,169,.5);border-radius:99px;padding:8px 14px;letter-spacing:1px}
+</style></head><body>
+<div class="wrap">
+  <div class="track"><i style="left:16%"></i><i style="left:36%"></i><i style="left:56%"></i><i style="left:76%"></i></div>
+  <div class="trail"></div>
+  <div class="ball"></div>
+  <div class="txt">
+    <div class="t1">弹珠竞速 · 50 关挑战</div>
+    <div class="t2">闪避风车、活塞与黑洞，冲下机关赛道</div>
+    <div class="t3">邀请好友，同一条赛道比用时</div>
+  </div>
+  <div class="tag">打开就能玩 ▶</div>
+</div>
+</body></html>
