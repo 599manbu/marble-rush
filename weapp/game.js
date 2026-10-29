@@ -166,14 +166,17 @@ function saveLevels() { store.set('marbleLevels', levelProgress); }
 function uploadLevelStats() {
   const keys = Object.keys(levelProgress.best);
   const cleared = keys.length;
-  const maxLv = keys.reduce((m, k) => Math.max(m, +k), 0);
-  const t = maxLv ? (levelProgress.best[maxLv] || 0) : 0;
+  let fastest = 0;
+  for (const k of keys) {
+    const t = +levelProgress.best[k] || 0;
+    if (t > 0 && (!fastest || t < fastest)) fastest = t;
+  }
   try {
     if (wx.setUserCloudStorage) {
       wx.setUserCloudStorage({
         KVDataList: [
           { key: 'lv', value: String(cleared) },
-          { key: 'time', value: String(Math.round((t || 0) * 100) / 100) },
+          { key: 'best', value: String(Math.round(fastest * 100) / 100) },
         ],
       });
     }
@@ -1704,7 +1707,7 @@ function drawRankUI() {
   const cx = UI_W / 2;
   ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
   ctx.fillText('好友排行', cx, 54);
-  textCentered('按已通关关卡数排序，同关卡比用时', cx, 80, '11px sans-serif', '#8ea6cf');
+  textCentered('按已通关关卡数排序，同关卡数比最快通关用时', cx, 80, '11px sans-serif', '#8ea6cf');
 
   const rx = 24, ry = 100, rw = 382, rh = 520;
   fillRoundRect(rx, ry, rw, rh, 12, 'rgba(8,14,28,0.6)', '#24365e', 1);

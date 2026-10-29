@@ -20,14 +20,16 @@ function load() {
   if (loading) return;
   loading = true; failed = '';
   wx.getFriendCloudStorage({
-    keyList: ['lv', 'time'],
+    keyList: ['lv', 'best', 'time'],
     success(res) {
       loading = false;
       list = (res.data || []).map(u => {
         let lv = 0, time = 0;
         (u.KVDataList || []).forEach(kv => {
           if (kv.key === 'lv') lv = parseInt(kv.value, 10) || 0;
-          if (kv.key === 'time') time = parseFloat(kv.value) || 0;
+          // best = 最快通关用时；time 为旧字段，兼容旧数据
+          if (kv.key === 'best') time = parseFloat(kv.value) || 0;
+          else if (kv.key === 'time' && !time) time = parseFloat(kv.value) || 0;
         });
         return { nick: u.nickname || '好友', avatar: u.avatarUrl || '', lv, time };
       }).sort((a, b) => (b.lv - a.lv) || ((a.time || 1e9) - (b.time || 1e9)));
@@ -128,9 +130,12 @@ function draw() {
     ctx.fillStyle = '#8ea6cf';
     ctx.fillText('已通关 ' + u.lv + ' 关', 66, y + 32);
     ctx.textAlign = 'right';
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#8ea6cf';
+    ctx.fillText('最快', DW - 66, y + 15);
     ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = '#6cd0ff';
-    ctx.fillText(fmt(u.time), DW - 10, y + 24);
+    ctx.fillText(fmt(u.time), DW - 10, y + 28);
     ctx.textAlign = 'left';
   }
 
