@@ -2110,14 +2110,23 @@ function frame(ts) {
 }
 
 /* ================= 分享 ================= */
-function setupShare() {
+function enableShareMenu() {
+  if (!wx.showShareMenu) return;
   try {
     wx.showShareMenu({
       withShareTicket: true,
       menus: ['shareAppMessage', 'shareTimeline'],
-      fail(e) { try { console.log('showShareMenu fail', e); } catch (err) {} },
+      fail() {
+        // 部分系统/基础库不支持朋友圈参数，退回只开启“发送给朋友”
+        try { wx.showShareMenu({ withShareTicket: true, menus: ['shareAppMessage'] }); } catch (e2) {}
+      },
     });
-  } catch (e) { /* 低版本忽略 */ }
+  } catch (e) {
+    try { wx.showShareMenu({ withShareTicket: true, menus: ['shareAppMessage'] }); } catch (e2) {}
+  }
+}
+function setupShare() {
+  enableShareMenu();
   if (wx.onShareAppMessage) {
     wx.onShareAppMessage(() => ({
       title: '赛球弹珠竞速 · 来和我比一场',
@@ -2155,6 +2164,7 @@ try {
 } catch (e) { /* 忽略 */ }
 if (wx.onShow) {
   wx.onShow(res => {
+    enableShareMenu();
     if (parseInvite(res && res.query)) {
       state = 'menu'; resultsVisible = false; settingsOpen = false; backPrompt = false;
       screen = 'invite';
