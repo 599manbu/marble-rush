@@ -64,6 +64,14 @@
   .volrow input[type=range]{width:min(320px,58vw);height:26px;accent-color:#ffd54a;cursor:pointer}
   .volrow b{min-width:46px;text-align:left;font-size:15px;color:#ffe9a8}
   .ctrl-desc{font-size:12px;color:#7ec9a9;letter-spacing:1px;margin:2px 0 6px;line-height:1.9}
+  .lvgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:8px 0 12px}
+  .lvtile{background:#0d1730;border:1px solid #33508a;border-radius:10px;padding:8px 4px 6px;cursor:pointer;color:#e8f0ff}
+  .lvtile b{display:block;font-size:18px}
+  .lvtile small{display:block;font-size:10px;color:#8ea6cf;margin-top:3px}
+  .lvtile.lock{opacity:.35;cursor:not-allowed}
+  .lvtile.cur{border-color:#ffd54a;box-shadow:0 0 10px rgba(255,213,74,.35)}
+  .invlink{width:100%;background:#0d1730;border:1px solid #33508a;border-radius:8px;color:#9fb6df;
+    font-size:11px;padding:8px;word-break:break-all;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -81,7 +89,8 @@
     </div>
     <div class="rowlbl">模 式</div>
     <div class="diffrow">
-      <button class="diff mode on" data-mode="1p">单人</button>
+      <button class="diff mode on" data-mode="level">关卡</button>
+      <button class="diff mode" data-mode="invite">邀请</button>
       <button class="diff mode" data-mode="2p">双人 · 分屏</button>
       <button class="diff mode" data-mode="spectate">全AI观赛</button>
     </div>
@@ -106,19 +115,52 @@
       <button class="diff" data-ai="hard">困难</button>
       <button class="diff" data-ai="nightmare">噩梦</button>
     </div>
-    <div class="rowlbl">小球数量（1-10，颜色各不相同）</div>
+    <div class="rowlbl" id="countLabel">小球数量（1-10，颜色各不相同）</div>
     <div class="diffrow" id="countRow"></div>
     <div class="rowlbl">选手命名（点击方框输入，自动保存）</div>
     <div id="nameGrid"></div>
     <button id="btnStart" class="btn">开始比赛 ▶</button>
     <div class="btnrow" style="margin-top:10px"><button id="btnSettings" class="diff">⚙ 设置</button></div>
-    <div class="best" id="bestLabel">单人最佳（普通）：--:--.-</div>
+    <div class="best" id="bestLabel">最佳（普通）：--:--.-</div>
     <div class="keys">
-      P1（金）<kbd>A</kbd><kbd>D</kbd> 转向 · <kbd>W</kbd> 刹车　P2（蓝）<kbd>←</kbd><kbd>→</kbd> 转向 · <kbd>↑</kbd> 刹车<br>
+      P1（金）<kbd>A</kbd><kbd>D</kbd> 转向　P2（蓝）<kbd>←</kbd><kbd>→</kbd> 转向（无刹车）<br>
       观赛模式：<kbd>空格</kbd> 切换视角（双屏：左屏固定榜首，空格切右屏）· <kbd>1</kbd>-<kbd>6</kbd> 直选 · 点击战况条<br>
       <kbd>R</kbd> 重开　<kbd>P</kbd> 暂停　<kbd>M</kbd> 静音　<kbd>Esc</kbd> 返回菜单
     </div>
-    <div class="mobile-hint">📱 手机可玩：默认左下角虚拟摇杆转向（上推刹车），双人模式左右各一个摇杆，建议横屏；可在 ⚙ 设置 中切换为左右按钮（下方 ◀ 左 / ▶ 右）并调节音效音量</div>
+    <div class="mobile-hint">📱 手机可玩：默认左右按钮（下方 ◀ 左 / ▶ 右），可在 ⚙ 设置 中切换为虚拟摇杆；双人模式左右各一组按钮，建议横屏</div>
+  </div>
+</div>
+
+<!-- 关卡选择 -->
+<div id="levels" class="overlay hidden">
+  <div class="panel">
+    <h2 class="res">关卡模式</h2>
+    <div class="resnote" id="lvNote">难度从噩梦起步，逐关递增</div>
+    <div class="lvgrid" id="lvGrid"></div>
+    <div class="btnrow">
+      <button id="lvPrev" class="diff">上一页</button>
+      <button id="lvNext" class="diff">下一页</button>
+    </div>
+    <div class="btnrow" style="margin-top:10px"><button id="lvBack" class="btn ghost">返回</button></div>
+  </div>
+</div>
+
+<!-- 邀请好友 -->
+<div id="invite" class="overlay hidden">
+  <div class="panel">
+    <h2 class="res">邀请好友</h2>
+    <div class="resnote">双方在完全相同的赛道上比用时</div>
+    <div class="desc" id="invDesc">
+      生成邀请链接发给好友，对方打开后进入同一条赛道；跑完后把成绩链接再发回去即可比胜负。
+      链接里会携带你的幽灵轨迹，好友能看到你的影子一起跑。
+    </div>
+    <div class="rowlbl" id="invCfg"></div>
+    <input id="invLink" class="invlink" readonly>
+    <div class="btnrow">
+      <button id="invCopy" class="diff">复制邀请链接</button>
+      <button id="invStart" class="btn">开始挑战 ▶</button>
+    </div>
+    <div class="btnrow" style="margin-top:10px"><button id="invBack" class="btn ghost">返回</button></div>
   </div>
 </div>
 
@@ -220,7 +262,7 @@ function tone(f0,f1,dur,type,vol,delay){
 }
 
 /* ================= 设置（操作方式 / 音效，自动保存） ================= */
-let settings={ctrl:'joy', vol:0.45, mute:false};   // ctrl: 'joy'=虚拟摇杆 | 'btn'=左右按钮
+let settings={ctrl:'btn', vol:0.45, mute:false};   // ctrl: 'joy'=虚拟摇杆 | 'btn'=左右按钮
 let settingsOpen=false;                            // 游戏中打开设置面板（暂停模拟）
 function loadSettings(){
   try{
@@ -296,10 +338,117 @@ const AILVLS = {                // AI 难度（独立选项：人机强度 + 机
   nightmare:{label:'噩梦', scale:1.00, spd:1.20, ai:[0.97,0.98,0.985,0.99,0.995]},
 };
 
+/* ================= 关卡模式（50 关） ================= */
+const MAX_LEVEL = 50;
+const LEVEL_BALLS = 6;
+function levelConfig(lv){
+  const t=(clamp(lv,1,MAX_LEVEL)-1)/(MAX_LEVEL-1);
+  return {
+    label:'第 '+lv+' 关',
+    scale:0.92+t*0.43,
+    spd:1.18+t*0.32,
+    ai:[0.950+t*0.030,0.960+t*0.025,0.970+t*0.020,0.980+t*0.015,0.988+t*0.012],
+    len:Math.round(lerp(19000,27000,t)),
+    level:lv,
+  };
+}
+function activeDiff(){ return mode==='level' ? levelConfig(currentLevel) : AILVLS[diffKey]; }
+let currentLevel=1, levelPage=0;
+let levelProgress={unlocked:1,best:{}};
+function loadLevels(){
+  try{ const p=JSON.parse(localStorage.getItem('marbleLevels'));
+    if(p&&typeof p==='object'){
+      levelProgress.unlocked=clamp(+p.unlocked||1,1,MAX_LEVEL);
+      levelProgress.best=(p.best&&typeof p.best==='object')?p.best:{};
+    }
+  }catch(e){}
+}
+function saveLevels(){ try{localStorage.setItem('marbleLevels',JSON.stringify(levelProgress));}catch(e){} }
+
+/* ================= 邀请 / 幽灵轨迹 ================= */
+let inviteSeed=0, inviteTime=0, inviteLastTime=0, ghostSamples=[], ghostRecord=[], ghostRecT=0, inviteGhostStr='';
+const B64U='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function b64urlEncode(bytes){
+  let out='',i=0;
+  for(;i+2<bytes.length;i+=3){const n=(bytes[i]<<16)|(bytes[i+1]<<8)|bytes[i+2];
+    out+=B64U[(n>>18)&63]+B64U[(n>>12)&63]+B64U[(n>>6)&63]+B64U[n&63];}
+  const rem=bytes.length-i;
+  if(rem===1){const n=bytes[i]<<16;out+=B64U[(n>>18)&63]+B64U[(n>>12)&63];}
+  else if(rem===2){const n=(bytes[i]<<16)|(bytes[i+1]<<8);out+=B64U[(n>>18)&63]+B64U[(n>>12)&63]+B64U[(n>>6)&63];}
+  return out;
+}
+function b64urlDecode(str){
+  const idx={}; for(let i=0;i<64;i++) idx[B64U[i]]=i;
+  const bytes=[]; let buf=0,bits=0;
+  for(let i=0;i<str.length;i++){const v=idx[str[i]]; if(v===undefined)continue;
+    buf=(buf<<6)|v; bits+=6; if(bits>=8){bits-=8;bytes.push((buf>>bits)&255);}}
+  return bytes;
+}
+function encodeGhost(s){
+  if(!s||s.length<2) return '';
+  let arr=s;
+  if(arr.length>200){const out=[],step=(arr.length-1)/199;for(let i=0;i<200;i++)out.push(arr[Math.round(i*step)]);arr=out;}
+  const bytes=[];
+  const y0=clamp(Math.round(arr[0].y),0,65535), x0=Math.round(clamp(arr[0].x,0,W)/W*1023);
+  bytes.push(y0>>8,y0&255,x0>>2,(x0&3)<<6);
+  let prev=arr[0].y;
+  for(let i=1;i<arr.length;i++){
+    const xq=Math.round(clamp(arr[i].x,0,W)/W*1023);
+    let dy=Math.round(arr[i].y-prev); prev=arr[i].y; dy=clamp(dy,0,1023);
+    const v=(xq<<10)|dy; bytes.push((v>>12)&255,(v>>4)&255,(v&15)<<4);
+  }
+  return b64urlEncode(bytes);
+}
+function decodeGhost(str){
+  const bytes=b64urlDecode(str||''); if(bytes.length<4) return [];
+  const y0=(bytes[0]<<8)|bytes[1], x0=((bytes[2]<<2)|(bytes[3]>>6));
+  const out=[{x:x0/1023*W,y:y0}]; let prev=y0;
+  for(let i=4;i+2<bytes.length;i+=3){
+    const v=(bytes[i]<<12)|(bytes[i+1]<<4)|(bytes[i+2]>>4);
+    const xq=(v>>10)&1023, dy=v&1023; prev+=dy;
+    out.push({x:xq/1023*W,y:prev});
+  }
+  return out;
+}
+function drawGhostBall(){
+  if(mode!=='invite'||!ghostSamples.length||!inviteTime) return;
+  const p=clamp(raceTime/inviteTime,0,1)*(ghostSamples.length-1);
+  const i0=Math.floor(p), i1=Math.min(ghostSamples.length-1,i0+1), k=p-i0;
+  const x=lerp(ghostSamples[i0].x,ghostSamples[i1].x,k);
+  const y=lerp(ghostSamples[i0].y,ghostSamples[i1].y,k);
+  ctx.save();
+  ctx.globalAlpha=0.55;
+  ctx.fillStyle='#6cd0ff'; ctx.shadowColor='#6cd0ff'; ctx.shadowBlur=16;
+  ctx.beginPath(); ctx.arc(x,y,R*0.92,0,TAU); ctx.fill();
+  ctx.shadowBlur=0; ctx.strokeStyle='rgba(200,240,255,0.9)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(x,y,R*0.92,0,TAU); ctx.stroke();
+  ctx.globalAlpha=1; ctx.font='bold 11px system-ui,"Microsoft YaHei"'; ctx.fillStyle='#cfefff';
+  ctx.textAlign='center'; ctx.fillText('好友',x,y-R-8);
+  ctx.restore();
+}
+function inviteLink(){
+  const q='seed='+inviteSeed+'&len='+lenKey+'&ai='+diffKey+'&c='+ballCount+
+    '&t='+(inviteLastTime?Math.round(inviteLastTime*100)/100:'');
+  const g=inviteGhostStr&&(q.length+inviteGhostStr.length+6<950)?'&g='+inviteGhostStr:'';
+  return location.origin+location.pathname+'?'+q+g;
+}
+function parseInvite(){
+  const q=new URLSearchParams(location.search);
+  if(!q.get('seed')) return false;
+  inviteSeed=+q.get('seed')||0;
+  if(LENGTHS[q.get('len')]) lenKey=q.get('len');
+  if(AILVLS[q.get('ai')]) diffKey=q.get('ai');
+  if(q.get('c')) ballCount=clamp(+q.get('c'),1,10);
+  inviteTime=+q.get('t')||0;
+  ghostSamples=q.get('g')?decodeGhost(q.get('g')):[];
+  mode='invite';
+  return true;
+}
+
 /* ================= 全局状态 ================= */
 let state='menu';              // menu | countdown | race | finishing | results
 let paused=false;
-let mode='1p';                 // '1p' | '2p' | 'spectate'
+let mode='level';              // 'level' | 'invite' | '2p' | 'spectate'
 let simTime=0, raceTime=0, countdownT=0, goT=-99, lastCount=99;
 let seed=(Math.random()*1e9)|0, lenKey='medium', diffKey='normal';
 let trackLen=LENGTHS.medium.len; // 终点 y（由赛道长度选项决定）
@@ -378,8 +527,8 @@ const joys=[{pid:null,bx:0,by:0,dx:0,dy:0,x:0,y:0},{pid:null,bx:0,by:0,dx:0,dy:0
 const JOY_R=58;                                             // 摇杆行程半径
 function joySlots(){                                        // 当前需要的摇杆：P1 左下；双人时 P2 右下
   if(state==='menu'||paused||backPrompt) return [];
-  if(mode==='1p') return [0];
   if(mode==='2p') return [0,1];
+  if(mode==='level'||mode==='invite') return [0];
   return [];
 }
 function joyBase(i){ return i===0 ? [116,ch-128] : [cw-116,ch-128]; }
@@ -427,7 +576,7 @@ const btnPresses=new Map();                     // pointerId -> {p,key}（多点
 function btnSlots(){                            // 按钮模式且处于可操作状态时显示
   if(settings.ctrl!=='btn') return false;
   if(state==='menu'||paused||backPrompt||settingsOpen) return false;
-  return mode==='1p'||mode==='2p';
+  return mode==='2p'||mode==='level'||mode==='invite';
 }
 function btnLayout(){                           // 单人：左下 ◀ / 右下 ▶；双人：左右各一组
   const r=cw<430?46:54, cy=ch-(r+66);
@@ -671,7 +820,7 @@ function rotNearest(o,px,py){
 /* ================= 弹珠 ================= */
 function makeBalls(){
   const jr = mulberry32(seed ^ 0x5f3759df);
-  const n = mode==='2p' ? Math.max(2,ballCount) : Math.max(1,ballCount);
+  const n = mode==='level' ? LEVEL_BALLS : (mode==='2p' ? Math.max(2,ballCount) : Math.max(1,ballCount));
   const roster = BALL_POOL.map((e,i)=>({name:customNames[i].trim()||e.name, color:e.color}));
   players=[];
   balls=[];
@@ -681,7 +830,7 @@ function makeBalls(){
     players=[balls[0]];
     return balls;
   }
-  const arr=AILVLS[diffKey].ai, lo=arr[0], hi=arr[arr.length-1];
+  const arr=activeDiff().ai, lo=arr[0], hi=arr[arr.length-1];
   const pSlots = mode==='2p'
     ? [Math.round((n-1)*0.3), Math.round((n-1)*0.7)]
     : [Math.floor((n-1)/2)];
@@ -864,9 +1013,11 @@ function rowIntervals(row,L,Rt){  // 一排障碍的自由通道
   return ivs;
 }
 function aiForce(b){
-  const P=AILVLS[diffKey];
+  const P=activeDiff();
+  const isLv = mode==='level';
+  const lvT = isLv ? (currentLevel-1)/(MAX_LEVEL-1) : 0;
   let fx = Math.sin(simTime*b.wf + b.phase) * b.wa * 0.5;         // 个性化漂移
-  let fy = GY * (P.spd - 0.06 + 0.10*b.skill);                    // 难度+技术决定底速
+  let fy = GY * (P.spd - 0.06 + 0.10*b.skill) * (isLv ? 1.00 + lvT*0.10 : 1);
   const look = 280 + 560*b.skill;
   const L=WALL+R+4, Rt=W-WALL-R-4;
   const rows=collectRows(b,look);
@@ -901,12 +1052,12 @@ function aiForce(b){
       for(const iv of use[0].ivs){const w=iv[1]-iv[0];if(w>wmax){wmax=w;target=(iv[0]+iv[1])/2;}}
       if(target===null) target=W/2;
     }
-    target=clamp(target + b.laneOff*(0.6-0.45*b.skill), L+8, Rt-8); // 个人走线偏移（高手几乎走纯线）
-    const steer=430+520*b.skill;                                    // 高手转向更狠
+    target=clamp(target + b.laneOff*(0.6-0.45*b.skill)*(isLv?0.6-lvT*0.1:1), L+8, Rt-8);
+    const steer=(430+520*b.skill)*(isLv?1.05+lvT*0.15:1);           // 高手转向更狠
     fx += clamp((target-b.x)*9 - b.vx*1.4, -steer, steer);          // 阻尼转向
     const rowDist=use[0].y-b.y;
     if(rowDist>=0 && rowDist<200 && Math.abs(target-b.x)>140)
-      fy*=lerp(0.55,0.88,b.skill);                                  // 高手刹车更少：预判对准了就敢冲
+      fy*=lerp(isLv?0.68+lvT*0.06:0.55,0.88,b.skill);               // 高手刹车更少：预判对准了就敢冲
   }
   // 前方弹珠避让：减少扎堆连撞
   for(const o of balls){
@@ -944,16 +1095,14 @@ function physics(dt){
         const pi=mode==='2p'&&b.pi===1?1:0;
         const j=joys[pi];
         let sx=(k.right-k.left);
-        let brake=k.up;
-        if(settings.ctrl==='btn'){                             // 左右按钮：数字量转向（无刹车）
+        if(settings.ctrl==='btn'){                             // 左右按钮：数字量转向
           const bs=btnState[pi];
           if(bs.right>bs.left) sx=1; else if(bs.left>bs.right) sx=-1;
-        }else if(j.pid!==null){
-          if(Math.abs(j.x)>0.12) sx=j.x;                       // 摇杆模拟量转向
-          if(j.y<-0.45) brake=true;                            // 摇杆上推=刹车
+        }else if(j.pid!==null && Math.abs(j.x)>0.12){
+          sx=j.x;                                              // 摇杆模拟量转向
         }
         fx=sx*820;
-        fy=GY-(brake?520:0);          // 无加速功能：只有转向与刹车
+        fy=GY;                         // 无刹车：始终向下加速
       }else{ [fx,fy]=aiForce(b); }
     }else{ fy=GY*0.25; }
     b.vx+=fx*dt; b.vy+=fy*dt;
@@ -1076,15 +1225,30 @@ function standings(){
 const $=id=>document.getElementById(id);
 function bestKey(){return 'marbleBest_'+lenKey+'_'+diffKey;}
 function refreshBest(){
+  if(mode==='level'){
+    const b=levelProgress.best[currentLevel];
+    $('bestLabel').textContent='第 '+currentLevel+' 关最佳：'+(b?fmtT(+b):'--:--.-');
+    $('countLabel').textContent='关卡模式固定 6 颗球';
+    renderLevelMenu();
+    return;
+  }
+  $('countLabel').textContent='小球数量（1-10，颜色各不相同）';
+  if(mode==='invite'){
+    $('bestLabel').textContent=inviteTime?('好友成绩：'+fmtT(inviteTime)):'邀请好友，同赛道比时间';
+    return;
+  }
   const v=localStorage.getItem(bestKey());
   $('bestLabel').textContent='最佳（'+LENGTHS[lenKey].label+'·'+AILVLS[diffKey].label+'）：'+(v?fmtT(+v):'--:--.-');
 }
 function startRace(newSeed){
   ensureAudio();
-  if(newSeed) seed=(Math.random()*1e9)|0;
-  trackLen=LENGTHS[lenKey].len;
-  track=genTrack(seed,AILVLS[diffKey].scale,trackLen);
+  if(mode==='invite'&&inviteSeed) seed=inviteSeed;
+  else if(newSeed) seed=(Math.random()*1e9)|0;
+  trackLen = mode==='level' ? levelConfig(currentLevel).len : LENGTHS[lenKey].len;
+  track=genTrack(seed,activeDiff().scale,trackLen);
   balls=makeBalls();
+  ghostRecord = (mode==='invite'&&players[0])?[{x:players[0].x,y:players[0].y}]:[];
+  ghostRecT=0;
   raceTime=0;countdownT=3.0;lastCount=99;goT=-99;
   state='countdown';paused=false;resultsFinal=false;
   closeSettings();
@@ -1092,6 +1256,8 @@ function startRace(newSeed){
   particles.length=0;clickTargets.length=0;
   $('menu').classList.add('hidden');
   $('results').classList.add('hidden');
+  $('levels').classList.add('hidden');
+  $('invite').classList.add('hidden');
 }
 function goMenu(){
   state='menu'; paused=false; backPrompt=false;
@@ -1099,6 +1265,9 @@ function goMenu(){
   particles.length=0; clickTargets.length=0;
   $('menu').classList.remove('hidden');
   $('results').classList.add('hidden');
+  $('levels').classList.add('hidden');
+  $('invite').classList.add('hidden');
+  renderLevelMenu();
   refreshBest();
 }
 function playerFinished(b){
@@ -1131,6 +1300,31 @@ function renderResults(final){
       $('resTitle').textContent = winner.isPlayer ? `🏆 ${winner.name} 冠军！` : '完赛！';
       note = players.map(p=>`${p.name} 第 ${st.indexOf(p)+1} 名`).join(' · ');
       if(winner.isPlayer) note += ' —— 你们击败了所有 人机！';
+    }else if(mode==='level'){
+      const p=players[0], rank=st.indexOf(p)+1;
+      if(rank===1){
+        $('resTitle').textContent='🏆 第 '+currentLevel+' 关通过！';
+        const prev=levelProgress.best[currentLevel];
+        if(!prev||p.finishTime<prev) levelProgress.best[currentLevel]=p.finishTime;
+        if(currentLevel<MAX_LEVEL&&levelProgress.unlocked<currentLevel+1) levelProgress.unlocked=currentLevel+1;
+        saveLevels();
+        note = currentLevel>=MAX_LEVEL ? '全部 50 关通关，恭喜！' : '用时 '+fmtT(p.finishTime)+'，已解锁第 '+(currentLevel+1)+' 关';
+      }else{
+        $('resTitle').textContent='挑战失败';
+        note='第 '+currentLevel+' 关需要拿到第 1 名才能解锁下一关，再试一次吧！';
+      }
+    }else if(mode==='invite'){
+      const p=players[0], t=p.finished?p.finishTime:0;
+      inviteLastTime=t||inviteLastTime;
+      inviteGhostStr=encodeGhost(ghostRecord);
+      if(inviteTime>0&&t>0){
+        const d=Math.abs(t-inviteTime);
+        if(t<inviteTime){ $('resTitle').textContent='🏆 你赢了！'; note='你的用时 '+fmtT(t)+'，好友用时 '+fmtT(inviteTime)+'，快了 '+fmtT(d); }
+        else { $('resTitle').textContent='惜败！'; note='你的用时 '+fmtT(t)+'，好友用时 '+fmtT(inviteTime)+'，慢了 '+fmtT(d); }
+      }else{
+        $('resTitle').textContent='挑战完成';
+        note=t>0?'用时 '+fmtT(t)+'，把成绩链接分享给好友一起比一比吧！':'再来一局试试。';
+      }
     }else{
       $('resTitle').textContent = winner.isPlayer ? '🏆 冠军！' : '完赛！';
       const r=st.indexOf(players[0])+1;
@@ -1141,14 +1335,76 @@ function renderResults(final){
     }
     $('resNote').textContent=note;
     refreshBest();
+    $('btnAgain').textContent = mode==='level'?'再次挑战':mode==='invite'?'再来一次':'再来一局';
+    $('btnNew').textContent = mode==='level'?'选择关卡':mode==='invite'?'复制成绩链接':'换新赛道';
     $('btnAgain').style.display='';$('btnNew').style.display='';
   }
 }
 
-$('btnStart').onclick=()=>startRace(false);
+$('btnStart').onclick=()=>{
+  if(mode==='level') openLevels();
+  else if(mode==='invite') openInvite();
+  else startRace(false);
+};
 $('btnAgain').onclick=()=>startRace(false);
-$('btnNew').onclick=()=>startRace(true);
+$('btnNew').onclick=()=>{
+  if(mode==='level') openLevels();
+  else if(mode==='invite') copyInvite();
+  else startRace(true);
+};
 $('btnMenu').onclick=()=>goMenu();
+
+/* ---------- 关卡选择 ---------- */
+function renderLevelMenu(){
+  const note=$('lvNote');
+  if(!note) return;
+  if(mode==='level'){
+    const cleared=Object.keys(levelProgress.best).length;
+    note.textContent='已解锁第 '+levelProgress.unlocked+' 关 · 已通关 '+cleared+' / '+MAX_LEVEL+' · 固定 6 颗球';
+  }
+}
+function renderLevelPage(){
+  levelPage=clamp(levelPage,0,Math.ceil(MAX_LEVEL/10)-1);
+  const grid=$('lvGrid'); grid.innerHTML='';
+  for(let i=0;i<10;i++){
+    const lv=levelPage*10+i+1; if(lv>MAX_LEVEL) break;
+    const unlocked=lv<=levelProgress.unlocked, best=levelProgress.best[lv];
+    const b=document.createElement('button');
+    b.className='lvtile'+(unlocked?'':' lock')+(lv===currentLevel?' cur':'');
+    b.innerHTML='<b>'+lv+'</b><small>'+(unlocked?(best?fmtT(best):'可挑战'):'未解锁')+'</small>';
+    if(unlocked) b.onclick=()=>{
+      currentLevel=lv; mode='level'; seed=7919*lv+12345;
+      $('levels').classList.add('hidden');
+      startRace(false);
+    };
+    grid.appendChild(b);
+  }
+  $('lvNote').textContent='第 '+(levelPage+1)+' / '+Math.ceil(MAX_LEVEL/10)+' 页 · 难度从噩梦起步逐关递增';
+}
+function openLevels(){ mode='level'; levelPage=Math.floor((currentLevel-1)/10); renderLevelPage(); $('levels').classList.remove('hidden'); $('menu').classList.add('hidden'); }
+$('lvPrev').onclick=()=>{ levelPage=Math.max(0,levelPage-1); renderLevelPage(); };
+$('lvNext').onclick=()=>{ levelPage=Math.min(Math.ceil(MAX_LEVEL/10)-1,levelPage+1); renderLevelPage(); };
+$('lvBack').onclick=()=>{ $('levels').classList.add('hidden'); $('menu').classList.remove('hidden'); };
+
+/* ---------- 邀请好友 ---------- */
+function refreshInviteUI(){
+  if(!inviteSeed) inviteSeed=(Math.random()*1e9)|0;
+  $('invCfg').textContent='当前配置：'+LENGTHS[lenKey].label+' · '+AILVLS[diffKey].label+' · '+ballCount+' 颗球'
+    +(inviteTime>0?' · 好友成绩 '+fmtT(inviteTime):'')
+    +(ghostSamples.length?' · 好友幽灵已就位':'');
+  $('invLink').value=inviteLink();
+}
+function openInvite(){ mode='invite'; refreshInviteUI(); $('invite').classList.remove('hidden'); $('menu').classList.add('hidden'); }
+$('invBack').onclick=()=>{ $('invite').classList.add('hidden'); $('menu').classList.remove('hidden'); };
+$('invCopy').onclick=()=>copyInvite();
+$('invStart').onclick=()=>{ $('invite').classList.add('hidden'); startRace(false); };
+function copyInvite(){
+  refreshInviteUI();
+  const link=$('invLink').value;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(link).then(()=>{ $('invCopy').textContent='已复制 ✓'; setTimeout(()=>$('invCopy').textContent='复制邀请链接',1500); }).catch(()=>{ $('invLink').select(); });
+  }else{ $('invLink').select(); document.execCommand&&document.execCommand('copy'); }
+}
 /* ---------- 菜单：数量/命名构建（事件委托，兼容动态按钮） ---------- */
 function buildCountRow(){
   const row=$('countRow');
@@ -1187,7 +1443,7 @@ $('menu').addEventListener('click',e=>{
              : btn.dataset.cnt!==undefined?'data-cnt':'data-screen';
   document.querySelectorAll(`.diff[${attr}]`).forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
-  if(btn.dataset.mode!==undefined){ mode=btn.dataset.mode; updateScreenRow(); }
+  if(btn.dataset.mode!==undefined){ mode=btn.dataset.mode; updateScreenRow(); if(mode==='level') openLevels(); else if(mode==='invite') openInvite(); }
   else if(btn.dataset.ai!==undefined){ diffKey=btn.dataset.ai; refreshBest(); }
   else if(btn.dataset.len!==undefined){ lenKey=btn.dataset.len; refreshBest(); }
   else if(btn.dataset.cnt!==undefined){ ballCount=+btn.dataset.cnt; saveRoster(); refreshNameGrid(); }
@@ -1287,6 +1543,7 @@ function drawWorld(yTop,yBot){
     ctx.globalAlpha=1;
   }
   for(const b of balls){ if(b.y<yTop-60||b.y>yBot+60) continue; drawBall(b); }
+  drawGhostBall();
   for(const p of particles){
     ctx.globalAlpha=Math.max(0,p.life/p.ttl);
     ctx.fillStyle=p.color;
@@ -1715,6 +1972,10 @@ function frame(ts){
     }else if(state==='race'||state==='finishing'){
       raceTime+=dt;
       physics(dt/2);physics(dt/2);
+      if(mode==='invite'&&players[0]&&!players[0].finished){
+        ghostRecT+=dt;
+        if(ghostRecT>=0.5){ ghostRecT-=0.5; ghostRecord.push({x:players[0].x,y:players[0].y}); }
+      }
       if(state==='finishing'){
         if(mode!=='spectate' && raceTime-lastResUpdate>0.25){renderResults(false);lastResUpdate=raceTime;}
         const done = mode==='spectate' ? balls.every(x=>x.finished) : players.every(p=>p.finished);
@@ -1733,7 +1994,10 @@ function frame(ts){
 /* ================= 启动 ================= */
 loadRoster();
 loadSettings();
+loadLevels();
 syncSettingsUI();
+if(parseInvite()) openInvite();
+renderLevelMenu();
 buildCountRow();
 buildNameGrid();
 track=genTrack(seed,AILVLS[diffKey].scale,trackLen);

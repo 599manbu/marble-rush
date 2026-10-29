@@ -1737,7 +1737,9 @@ function drawInviteUI() {
   const cx = UI_W / 2;
   ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
   ctx.fillText('邀请好友', cx, 52);
-  textCentered('双方在完全相同的赛道上比用时', cx, 78, '11px sans-serif', '#8ea6cf');
+  const fromFriend = inviteTime > 0 || ghostSamples.length > 0;
+  textCentered(fromFriend ? '这是好友玩过的赛道 · 挑战好友成绩' : '双方在完全相同的赛道上比用时',
+    cx, 78, '11px sans-serif', fromFriend ? '#ffd54a' : '#8ea6cf');
   wrapText('点击「分享邀请卡」发给好友，对方点开卡片后会自动进入同一条赛道；跑完后把成绩再分享回去，就能比出胜负。',
     px + 24, 104, pw - 48, 18, '12px sans-serif', '#c3d3ef');
 
@@ -2054,6 +2056,9 @@ function render() {
     ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(195,211,239,0.85)';
     ctx.font = '13px sans-serif';
     const tip = mode === 'spectate' ? '点按排名或画面切换视角'
+      : mode === 'invite' ? (inviteTime > 0
+          ? '这是好友玩过的赛道 · 好友成绩 ' + fmtT(inviteTime) + '，争取跑得更快！'
+          : '这是好友玩过的赛道 · 争取跑得更快！')
       : '左右转向 · 撞开对手抢线！';
     ctx.fillText(tip, cw / 2, ch - 58);
   }
