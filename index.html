@@ -89,6 +89,7 @@
     </div>
     <div class="rowlbl">模 式</div>
     <div class="diffrow">
+      <button class="diff mode" data-mode="solo">单人</button>
       <button class="diff mode on" data-mode="level">关卡</button>
       <button class="diff mode" data-mode="invite">邀请</button>
       <button class="diff mode" data-mode="2p">双人 · 分屏</button>
@@ -528,7 +529,7 @@ const JOY_R=58;                                             // 摇杆行程半�
 function joySlots(){                                        // 当前需要的摇杆：P1 左下；双人时 P2 右下
   if(state==='menu'||paused||backPrompt) return [];
   if(mode==='2p') return [0,1];
-  if(mode==='level'||mode==='invite') return [0];
+  if(mode==='solo'||mode==='level'||mode==='invite') return [0];
   return [];
 }
 function joyBase(i){ return i===0 ? [116,ch-128] : [cw-116,ch-128]; }
@@ -576,7 +577,7 @@ const btnPresses=new Map();                     // pointerId -> {p,key}（多点
 function btnSlots(){                            // 按钮模式且处于可操作状态时显示
   if(settings.ctrl!=='btn') return false;
   if(state==='menu'||paused||backPrompt||settingsOpen) return false;
-  return mode==='2p'||mode==='level'||mode==='invite';
+  return mode==='solo'||mode==='2p'||mode==='level'||mode==='invite';
 }
 function btnLayout(){                           // 单人：左下 ◀ / 右下 ▶；双人：左右各一组
   const r=cw<430?46:54, cy=ch-(r+66);

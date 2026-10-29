@@ -952,6 +952,10 @@ function bestText() {
     return '第 ' + currentLevel + ' 关最佳：' + (b ? fmtT(+b) : '--:--.-');
   }
   if (mode === 'invite') return inviteTime ? '好友成绩：' + fmtT(inviteTime) : '邀请好友，同赛道比时间';
+  if (mode === 'solo') {
+    const v = store.get(bestKey(), 0);
+    return '单人最佳（' + LENGTHS[lenKey].label + '·' + AILVLS[diffKey].label + '）：' + (v ? fmtT(+v) : '--:--.-');
+  }
   return '全 AI 观赛模式 · 不计成绩';
 }
 let resultsVisible = false;
@@ -1554,8 +1558,8 @@ function drawMenuUI() {
   const bx0 = px + 16, bwAll = pw - 32;
   // 模式
   textCentered('模 式', cx, 212, '11px sans-serif', '#7e97c4');
-  const modes = [['level', '关卡'], ['invite', '邀请'], ['spectate', '观赛']];
-  const mw = (bwAll - 12) / 3;
+  const modes = [['solo', '单人'], ['level', '关卡'], ['invite', '邀请'], ['spectate', '观赛']];
+  const mw = (bwAll - 18) / 4;
   modes.forEach((m, i) => uiButton(bx0 + i * (mw + 6), 222, mw, 34, m[1], mode === m[0], 'mode', m[0], { font: 14 }));
 
   if (mode === 'level') {
@@ -1847,7 +1851,7 @@ function drawSettingsUI() {
 /* ================= 触控 ================= */
 function joySlots() {
   if (state === 'menu' || paused || backPrompt || settingsOpen || resultsVisible) return [];
-  if (mode === 'level' || mode === 'invite') return [0];
+  if (mode === 'solo' || mode === 'level' || mode === 'invite') return [0];
   return [];
 }
 function joyBase(i) { return i === 0 ? [116, ch - 128] : [cw - 116, ch - 128]; }
@@ -1869,7 +1873,7 @@ function joyMove(j, x, y) {
 function btnSlots() {
   if (settings.ctrl !== 'btn') return false;
   if (state === 'menu' || paused || backPrompt || settingsOpen || resultsVisible) return false;
-  return mode === 'level' || mode === 'invite';
+  return mode === 'solo' || mode === 'level' || mode === 'invite';
 }
 function btnLayout() {
   const r = cw < 430 ? 46 : 54, cy = ch - (r + 66);
