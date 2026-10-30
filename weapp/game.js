@@ -178,6 +178,7 @@ function uploadLevelStats() {
           { key: 'lv', value: String(cleared) },
           { key: 'best', value: String(Math.round(fastest * 100) / 100) },
         ],
+        fail(e) { try { console.log('setUserCloudStorage fail', e); } catch (err) {} },
       });
     }
   } catch (e) { /* 未登录/测试号时忽略 */ }
@@ -1726,6 +1727,14 @@ function drawRankUI() {
   if (!drew) {
     textCentered('排行榜需在小游戏真机环境中查看', cx, ry + rh / 2, '12px sans-serif', '#8ea6cf');
   }
+  // 本机成绩：用于确认自己是否已上传
+  const cleared = Object.keys(levelProgress.best).length;
+  let fastest = 0;
+  for (const k in levelProgress.best) {
+    const t = +levelProgress.best[k] || 0;
+    if (t > 0 && (!fastest || t < fastest)) fastest = t;
+  }
+  textCentered('我：已通关 ' + cleared + ' 关 · 最快 ' + (fastest ? fmtT(fastest) : '--:--'), cx, 632, '11px sans-serif', '#7ec9a9');
 
   uiButton(cx - 150, 640, 300, 38, '刷新', false, 'rank-refresh', null, { font: 13 });
   uiButton(cx - 70, 690, 140, 38, '返回', false, 'rank-back', null, { font: 14 });
@@ -2166,6 +2175,14 @@ loadRoster();
 loadSettings();
 loadLevels();
 uploadLevelStats();
+if (wx.login) {
+  try {
+    wx.login({
+      success() { uploadLevelStats(); },
+      fail(e) { try { console.log('wx.login fail', e); } catch (err) {} },
+    });
+  } catch (e) { /* 忽略 */ }
+}
 setupShare();
 try {
   const lo = wx.getLaunchOptionsSync ? wx.getLaunchOptionsSync() : null;
