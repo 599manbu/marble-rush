@@ -5,10 +5,28 @@ const ctx = sharedCanvas.getContext('2d');
 
 const DW = 382, DH = 520;          // 设计尺寸（主域按此比例绘制）
 let list = [];
+let selfData = null;
 let visible = false;
 let loading = false;
 let failed = '';
 const imgCache = {};
+
+function parseUser(u, isSelf) {
+  let lv = 0, time = 0;
+  (u.KVDataList || []).forEach(kv => {
+    if (kv.key === 'lv') lv = parseInt(kv.value, 10) || 0;
+    if (kv.key === 'best') time = parseFloat(kv.value) || 0;
+    else if (kv.key === 'time' && !time) time = parseFloat(kv.value) || 0;   // 兼容旧字段
+  });
+  return {
+    nick: isSelf ? '我' : (u.nickname || '好友'),
+    avatar: u.avatarUrl || '',
+    lv, time, isSelf: !!isSelf,
+  };
+}
+function sortList() {
+  list.sort((a, b) => (b.lv - a.lv) || ((a.time || 1e9) - (b.time || 1e9)));
+}
 
 function fmt(t) {
   if (!t || t <= 0) return '--:--';
@@ -19,28 +37,41 @@ function fmt(t) {
 function load() {
   if (loading) return;
   loading = true; failed = '';
+  let left = 2;
+  const done = () => { if (--left <= 0) { mergeSelf(); draw(); } };
+  const keyList = ['lv', 'best', 'time'];
+
   wx.getFriendCloudStorage({
-    keyList: ['lv', 'best', 'time'],
+    keyList,
     success(res) {
-      loading = false;
-      list = (res.data || []).map(u => {
-        let lv = 0, time = 0;
-        (u.KVDataList || []).forEach(kv => {
-          if (kv.key === 'lv') lv = parseInt(kv.value, 10) || 0;
-          // best = 最快通关用时；time 为旧字段，兼容旧数据
-          if (kv.key === 'best') time = parseFloat(kv.value) || 0;
-          else if (kv.key === 'time' && !time) time = parseFloat(kv.value) || 0;
-        });
-        return { nick: u.nickname || '好友', avatar: u.avatarUrl || '', lv, time };
-      }).sort((a, b) => (b.lv - a.lv) || ((a.time || 1e9) - (b.time || 1e9)));
-      draw();
+      list = (res.data || []).map(u => parseUser(u, false));
+      done();
     },
     fail(e) {
-      loading = false;
       failed = (e && e.errMsg) ? e.errMsg : '读取好友数据失败';
-      draw();
+      list = [];
+      done();
     },
   });
+
+  // getFriendCloudStorage 不保证包含自己，单独读取自己的托管数据再合并
+  if (wx.getUserCloudStorage) {
+    wx.getUserCloudStorage({
+      keyList,
+      success(res) { selfData = parseUser(res || {}, true); done(); },
+      fail() { selfData = null; done(); },
+    });
+  } else {
+    selfData = null; done();
+  }
+}
+function mergeSelf() {
+  loading = false;
+  list = (list || []).filter(u => !u.isSelf);
+  if (selfData && (selfData.lv > 0 || selfData.time > 0)) {
+    list.push(selfData);
+  }
+  sortList();
 }
 
 function getImg(url) {
@@ -63,7 +94,7 @@ function draw() {
   ctx.save();
   ctx.scale(scaleX, scaleY);
 
-  if (failed) {
+  if (failed && !list.length) {
     ctx.fillStyle = '#8ea6cf';
     ctx.font = '13px sans-serif';
     ctx.textAlign = 'center';
@@ -93,7 +124,10 @@ function draw() {
   for (let i = 0; i < count; i++) {
     const u = list[i];
     const y = top + i * rowH;
-    if (i % 2 === 0) {
+    if (u.isSelf) {
+      ctx.fillStyle = 'rgba(108,208,255,0.14)';
+      ctx.fillRect(0, y, DW, rowH - 4);
+    } else if (i % 2 === 0) {
       ctx.fillStyle = 'rgba(18,30,56,0.55)';
       ctx.beginPath();
       ctx.moveTo(0, y); ctx.lineTo(DW, y); ctx.lineTo(DW, y + rowH - 4); ctx.lineTo(0, y + rowH - 4);
@@ -120,7 +154,7 @@ function draw() {
     // 昵称
     ctx.textAlign = 'left';
     ctx.font = '13px sans-serif';
-    ctx.fillStyle = '#e8f0ff';
+    ctx.fillStyle = u.isSelf ? '#6cd0ff' : '#e8f0ff';
     let nick = u.nick;
     if (nick.length > 8) nick = nick.slice(0, 8) + '…';
     ctx.fillText(nick, 66, y + 18);

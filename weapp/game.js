@@ -163,7 +163,7 @@ function loadLevels() {
 }
 function saveLevels() { store.set('marbleLevels', levelProgress); }
 // 把关卡进度上传到微信托管数据（好友排行榜用）
-function uploadLevelStats() {
+function uploadLevelStats(cb) {
   const keys = Object.keys(levelProgress.best);
   const cleared = keys.length;
   let fastest = 0;
@@ -171,6 +171,7 @@ function uploadLevelStats() {
     const t = +levelProgress.best[k] || 0;
     if (t > 0 && (!fastest || t < fastest)) fastest = t;
   }
+  const done = () => { if (cb) cb(); };
   try {
     if (wx.setUserCloudStorage) {
       wx.setUserCloudStorage({
@@ -178,10 +179,11 @@ function uploadLevelStats() {
           { key: 'lv', value: String(cleared) },
           { key: 'best', value: String(Math.round(fastest * 100) / 100) },
         ],
-        fail(e) { try { console.log('setUserCloudStorage fail', e); } catch (err) {} },
+        success: done,
+        fail(e) { try { console.log('setUserCloudStorage fail', e); } catch (err) {} done(); },
       });
-    }
-  } catch (e) { /* 未登录/测试号时忽略 */ }
+    } else done();
+  } catch (e) { done(); }
 }
 
 /* ================= 邀请好友（同赛道异步对战） ================= */
@@ -1701,7 +1703,10 @@ function enterRank() {
     const sc = oc.canvas;
     const w = 764, h = 1040;
     if (sc.width !== w || sc.height !== h) { sc.width = w; sc.height = h; }
-    oc.postMessage({ type: 'show', width: w, height: h });
+    const post = () => oc.postMessage({ type: 'show', width: w, height: h });
+    post();
+    // 先把自己最新成绩传上去，再让开放数据域重新读取
+    uploadLevelStats(() => { post(); setTimeout(() => { try { oc.postMessage({ type: 'refresh' }); } catch (e) {} }, 300); });
   } catch (e) { /* 测试号可能不支持 */ }
 }
 function drawRankUI() {
@@ -1962,7 +1967,14 @@ function handleUIHit(h, x, y) {
       try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'hide' }); } catch (e) {}
       return true;
     case 'rank-refresh':
-      try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'refresh' }); } catch (e) {}
+      uploadLevelStats();
+      try {
+        const oc = wx.getOpenDataContext && wx.getOpenDataContext();
+        if (oc) {
+          oc.postMessage({ type: 'refresh' });
+          setTimeout(() => { try { oc.postMessage({ type: 'refresh' }); } catch (e) {} }, 400);
+        }
+      } catch (e) {}
       return true;
     case 'open-settings':
       settingsOpen = true;
