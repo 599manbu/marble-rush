@@ -144,7 +144,7 @@ function levelConfig(lv) {
   return {
     label: '第 ' + lv + ' 关',
     scale: 0.92 + t * 0.43,         // 第 1 关略低于噩梦，第 50 关超过噩梦
-    spd: 1.18 + t * 0.32,           // 人机速度：第 1 关略低于噩梦，逐关提升
+    spd: 1.06 + t * 0.28,           // 人机速度：整体下调，逐关提升
     ai: [0.950 + t * 0.030, 0.960 + t * 0.025, 0.970 + t * 0.020, 0.980 + t * 0.015, 0.988 + t * 0.012],
     len: Math.round(lerp(19000, 27000, t)),   // 约 1 分钟赛道
     level: lv,
@@ -719,7 +719,7 @@ function aiForce(b) {
   const isLv = mode === 'level';
   const lvT = isLv ? (currentLevel - 1) / (MAX_LEVEL - 1) : 0;
   let fx = Math.sin(simTime * b.wf + b.phase) * b.wa * 0.5;
-  let fy = GY * (P.spd - 0.06 + 0.10 * b.skill) * (isLv ? 1.00 + lvT * 0.10 : 1);
+  let fy = GY * (P.spd - 0.06 + 0.10 * b.skill) * (isLv ? 0.96 + lvT * 0.08 : 1);
   const look = 280 + 560 * b.skill;
   const L = WALL + R + 4, Rt = W - WALL - R - 4;
   const rows = collectRows(b, look);
@@ -1012,7 +1012,7 @@ function renderResults(final) {
     } else if (mode === 'level') {
       const p = players[0];
       const rank = st.indexOf(p) + 1;
-      if (rank === 1) {
+      if (rank <= 3) {
         resTitleText = '🏆 第 ' + currentLevel + ' 关通过！';
         const prev = levelProgress.best[currentLevel];
         if (!prev || p.finishTime < prev) levelProgress.best[currentLevel] = p.finishTime;
@@ -1022,10 +1022,10 @@ function renderResults(final) {
         uploadLevelStats();
         resNoteText = currentLevel >= MAX_LEVEL
           ? '全部 50 关通关，恭喜！用时 ' + fmtT(p.finishTime)
-          : '用时 ' + fmtT(p.finishTime) + '，已解锁第 ' + (currentLevel + 1) + ' 关';
+          : '第 ' + rank + ' 名，用时 ' + fmtT(p.finishTime) + '，已解锁第 ' + (currentLevel + 1) + ' 关';
       } else {
         resTitleText = '挑战失败';
-        resNoteText = '第 ' + currentLevel + ' 关需要拿到第 1 名才能解锁下一关，再试一次吧！';
+        resNoteText = '第 ' + currentLevel + ' 关需要进入前三名才能解锁下一关，再试一次吧！';
       }
     } else if (mode === 'invite') {
       const p = players[0];
