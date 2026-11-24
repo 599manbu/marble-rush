@@ -269,7 +269,7 @@ let rt = {
   tab: 'ghost',                 // ghost | realtime
   active: false, host: false, started: false, canStart: false,
   roomCode: '', docId: '', status: '', seed: 0,
-  players: [], aiCount: 3, maxPlayers: 4, name: '',
+  players: [], aiCount: 3, maxPlayers: 4, name: '', myColor: 0,
   roomWatcher: null, stateWatcher: null, lastPush: 0, finishAt: 0,
 };
 let rtPendingRoom = '';
@@ -335,6 +335,7 @@ function rtCreateRoom() {
   rt.roomCode = String(Math.floor(100000 + Math.random() * 900000));
   rt.seed = (Math.random() * 1e9) | 0;
   rt.aiCount = 3;
+  rt.myColor = 0;
   rt.status = '正在创建房间…';
   cloudDb.collection('mr_rooms').add({
     data: {
@@ -372,10 +373,11 @@ function rtJoinRoom(code) {
     const maxP = d.maxPlayers || 4;
     cloudDb.collection('mr_states').where({ roomId: code }).count().then(c => {
       if (c.total >= maxP) { rt.status = '房间已满（最多 ' + maxP + ' 人）'; return; }
+      rt.myColor = c.total % 4;
       rtWritePresence();
       rtWatchRoom();
       rtWatchStates();
-      if (d.status === 'racing') rtStartRace(d.seed);
+      if (d.status === 'racing') rtStartRace(d.seed, Math.max(0, (d.startAt || 0) - Date.now()));
     }).catch(() => {
       rtWritePresence();
       rtWatchRoom();
@@ -393,7 +395,9 @@ function rtWatchRoom() {
         const d = snap.docs && snap.docs[0];
         if (!d) return;
         if (typeof d.aiCount === 'number') rt.aiCount = clamp(d.aiCount, 0, 5);
-        if (d.status === 'racing' && !rt.started) rtStartRace(d.seed);
+        if (d.status === 'racing' && !rt.started) {
+          rtStartRace(d.seed, Math.max(0, (d.startAt || 0) - Date.now()));
+        }
       },
       onError() { rt.status = '房间同步失败'; },
     });
@@ -405,7 +409,7 @@ function rtWritePresence() {
   try {
     cloudDb.collection('mr_states').doc(id).set({
       data: {
-        roomId: rt.roomCode, pid: myPid(), name: rtName(),
+        roomId: rt.roomCode, pid: myPid(), name: rtName(), colorIdx: rt.myColor,
         x: 0, y: 0, finished: false, finishTime: 0, ts: Date.now(), joined: true,
       },
     }).catch(() => {});
@@ -428,7 +432,7 @@ function rtWatchStates() {
     });
   } catch (e) {}
 }
-function rtStartRace(seedVal) {
+function rtStartRace(seedVal, delayMs) {
   if (rt.started) return;
   if (rtLeft() <= 0) {
     rt.status = '今日实时对战次数已用完（' + RT_DAILY_LIMIT + ' 次）';
@@ -441,6 +445,12 @@ function rtStartRace(seedVal) {
   mode = 'realtime';
   screen = 'menu';
   startRace(false);
+  // 按房主下发的开赛时间对齐倒计时
+  const delay = clamp((delayMs || 0) / 1000, 0, 5);
+  countdownT = 3 + delay;
+  state = 'countdown';
+  rt.lastPush = 0;
+  rtPushState();
 }
 function rtPushState() {
   if (mode !== 'realtime' || !cloudDb || !rt.roomCode) return;
@@ -471,7 +481,7 @@ function rtDrawRemote() {
     if (!d) { d = remoteDraws[st.pid] = { x: tx, y: ty }; }
     d.x += (tx - d.x) * 0.25;
     d.y += (ty - d.y) * 0.25;
-    const color = RT_COLORS[i % RT_COLORS.length];
+    const color = RT_COLORS[((+st.colorIdx) || i) % RT_COLORS.length];
     ctx.save();
     ctx.globalAlpha = 0.85;
     ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 18;
@@ -487,6 +497,26 @@ function rtDrawRemote() {
 }
 function rtRemoteFinishTimes() {
   return remoteStates.map(s => +s.finishTime).filter(t => t > 0);
+}
+function realtimeRankList() {
+  const list = balls.map(b => ({
+    name: b.name, y: b.y, finished: b.finished, finishTime: b.finishTime,
+    color: b.color, me: b.isPlayer,
+  }));
+  remoteStates.forEach(st => {
+    list.push({
+      name: st.name || '玩家', y: +st.y || 0,
+      finished: !!st.finished, finishTime: +st.finishTime || 0,
+      color: RT_COLORS[((+st.colorIdx) || 0) % RT_COLORS.length], me: false,
+    });
+  });
+  list.sort((a, b) => {
+    if (a.finished && b.finished) return a.finishTime - b.finishTime;
+    if (a.finished) return -1;
+    if (b.finished) return 1;
+    return b.y - a.y;
+  });
+  return list;
 }
 
 /* ================= 幽灵轨迹压缩（无服务器，走分享卡 query） ================= */
@@ -1219,7 +1249,10 @@ function startRace(newSeed) {
   trackLen = mode === 'level' ? levelConfig(currentLevel).len : LENGTHS[lenKey].len;
   track = genTrack(seed, activeDiff().scale, trackLen);
   balls = makeBalls();
-  if (mode === 'realtime' && players[0]) players[0].name = rtName();
+  if (mode === 'realtime' && players[0]) {
+    players[0].name = rtName();
+    players[0].color = RT_COLORS[rt.myColor % RT_COLORS.length];
+  }
   ghostRecord = mode === 'invite' && players[0] ? [{ x: players[0].x, y: players[0].y }] : [];
   ghostRecT = 0;
   raceTime = 0; countdownT = 3.0; lastCount = 99; goT = -99;
@@ -1592,8 +1625,10 @@ function renderView(vx, vy, vw, vh, p, sIdx) {
 }
 function drawViewHUD(p, vx, vy, vw, vh, sIdx) {
   sIdx = sIdx || 0;
-  const st = standings();
-  const rank = st.indexOf(p) + 1;
+  const st = mode === 'realtime' ? realtimeRankList() : standings();
+  const rank = mode === 'realtime'
+    ? (st.findIndex(x => x.me) + 1 || st.length)
+    : st.indexOf(p) + 1;
   if (mode === 'spectate' && spectateSplit) {
     const isSp = true;
     const active = sIdx === 1;
@@ -1633,13 +1668,13 @@ function drawViewHUD(p, vx, vy, vw, vh, sIdx) {
   }
   const bx = vw - 186;
   ctx.fillStyle = 'rgba(8,14,28,0.62)';
-  pathRoundRect(bx - 14, 46, 200, 25 + balls.length * 26, 12); ctx.fill();
+  pathRoundRect(bx - 14, 46, 200, 25 + st.length * 26, 12); ctx.fill();
   ctx.strokeStyle = 'rgba(90,130,200,0.35)'; ctx.stroke();
   ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#7e97c4';
   ctx.fillText('实时排名', bx, 70);
   st.forEach((b, i) => {
     const y = 94 + i * 26;
-    const me = spect ? b === players[0] : b.isPlayer;
+    const me = mode === 'realtime' ? !!b.me : (spect ? b === players[0] : b.isPlayer);
     if (me) { ctx.fillStyle = 'rgba(255,213,74,0.12)'; ctx.fillRect(bx - 8, y - 15, 184, 22); }
     if (spect) clickTargets.push({ x: bx - 8, y: y - 15, w: 184, h: 22, act: 'follow', i: balls.indexOf(b) });
     ctx.fillStyle = b.color;
@@ -2445,10 +2480,11 @@ function handleUIHit(h, x, y) {
       return true;
     case 'rt-start':
       if (rt.host && rt.canStart && cloudDb && rt.docId) {
+        const startAt = Date.now() + 3000;
         try {
-          cloudDb.collection('mr_rooms').doc(rt.docId).update({ data: { status: 'racing' } }).catch(() => {});
+          cloudDb.collection('mr_rooms').doc(rt.docId).update({ data: { status: 'racing', startAt } }).catch(() => {});
         } catch (e) {}
-        rtStartRace(rt.seed);
+        rtStartRace(rt.seed, 3000);
       }
       return true;
     case 'open-rank': rankFrom = screen; enterRank(); return true;
@@ -2619,6 +2655,7 @@ function frame(ts) {
     if (state === 'menu') { menuCam += dt * 80; }
     else if (state === 'countdown') {
       countdownT -= dt;
+      if (mode === 'realtime') rtPushState();
       const n = Math.ceil(countdownT);
       if (n < lastCount && n > 0) { sndBeep(); lastCount = n; }
       if (countdownT <= 0) { state = 'race'; goT = raceTime; sndGo(); }
