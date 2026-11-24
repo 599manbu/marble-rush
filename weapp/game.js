@@ -259,7 +259,7 @@ let ghostRecT = 0;
 let inviteGhostStr = '';        // 压缩后的轨迹（分享卡携带）
 
 /* ================= 实时对战（微信云开发） ================= */
-const CLOUD_ENV = '';           // 填云开发环境 ID；留空则用默认环境
+const CLOUD_ENV = 'manbu-d5g2qu3sb15ea976a';   // 云开发环境 ID
 const RT_DAILY_LIMIT = 5;
 let cloudDb = null, cloudReady = false;
 let remoteState = null, remoteDraw = null;
