@@ -262,14 +262,21 @@ let inviteGhostStr = '';        // 压缩后的轨迹（分享卡携带）
 const CLOUD_ENV = 'manbu-d5g2qu3sb15ea976a';   // 云开发环境 ID
 const RT_DAILY_LIMIT = 5;
 let cloudDb = null, cloudReady = false;
-let remoteState = null, remoteDraw = null;
+let remoteStates = [];          // 其他玩家状态
+let remoteDraws = {};           // pid -> 插值后的绘制坐标
 let rt = {
   tab: 'ghost',                 // ghost | realtime
   active: false, host: false, started: false, canStart: false,
   roomCode: '', docId: '', status: '', seed: 0,
+  players: [], aiCount: 3, maxPlayers: 4, name: '',
   roomWatcher: null, stateWatcher: null, lastPush: 0, finishAt: 0,
 };
 let rtPendingRoom = '';
+function rtName() {
+  let n = store.get('mrName', '');
+  if (!n) n = '玩家' + (1000 + Math.floor(Math.random() * 9000));
+  return n;
+}
 function myPid() {
   let p = store.get('mrPid', '');
   if (!p) {
@@ -306,7 +313,8 @@ function rtLeave() {
   rtStopWatch();
   rt.active = false; rt.host = false; rt.started = false; rt.canStart = false;
   rt.roomCode = ''; rt.docId = ''; rt.status = ''; rt.seed = 0;
-  remoteState = null; remoteDraw = null;
+  rt.players = []; rt.aiCount = 3;
+  remoteStates = []; remoteDraws = {};
 }
 function rtShareRoom() {
   try {
@@ -325,12 +333,14 @@ function rtCreateRoom() {
   rt.active = true; rt.host = true;
   rt.roomCode = String(Math.floor(100000 + Math.random() * 900000));
   rt.seed = (Math.random() * 1e9) | 0;
+  rt.aiCount = 3;
   rt.status = '正在创建房间…';
   cloudDb.collection('mr_rooms').add({
     data: {
       code: rt.roomCode,
       seed: rt.seed,
       len: lenKey, ai: diffKey, c: ballCount,
+      aiCount: rt.aiCount, maxPlayers: rt.maxPlayers,
       status: 'waiting', host: myPid(), createdAt: Date.now(),
     },
   }).then(res => {
@@ -358,10 +368,18 @@ function rtJoinRoom(code) {
     if (d.ai) diffKey = d.ai;
     if (d.c) ballCount = clamp(+d.c, 1, 10);
     rt.status = d.status === 'racing' ? '对局进行中…' : '等待房主开始…';
-    rtWritePresence();
-    rtWatchRoom();
-    rtWatchStates();
-    if (d.status === 'racing') rtStartRace(d.seed);
+    const maxP = d.maxPlayers || 4;
+    cloudDb.collection('mr_states').where({ roomId: code }).count().then(c => {
+      if (c.total >= maxP) { rt.status = '房间已满（最多 ' + maxP + ' 人）'; return; }
+      rtWritePresence();
+      rtWatchRoom();
+      rtWatchStates();
+      if (d.status === 'racing') rtStartRace(d.seed);
+    }).catch(() => {
+      rtWritePresence();
+      rtWatchRoom();
+      rtWatchStates();
+    });
   }).catch(e => {
     rt.status = '加入失败：' + (e && (e.errMsg || e.message) || '请检查云开发');
   });
@@ -373,6 +391,7 @@ function rtWatchRoom() {
       onChange(snap) {
         const d = snap.docs && snap.docs[0];
         if (!d) return;
+        if (typeof d.aiCount === 'number') rt.aiCount = clamp(d.aiCount, 0, 5);
         if (d.status === 'racing' && !rt.started) rtStartRace(d.seed);
       },
       onError() { rt.status = '房间同步失败'; },
@@ -385,7 +404,7 @@ function rtWritePresence() {
   try {
     cloudDb.collection('mr_states').doc(id).set({
       data: {
-        roomId: rt.roomCode, pid: myPid(), name: customNames[0] || '好友',
+        roomId: rt.roomCode, pid: myPid(), name: rtName(),
         x: 0, y: 0, finished: false, finishTime: 0, ts: Date.now(), joined: true,
       },
     }).catch(() => {});
@@ -397,10 +416,8 @@ function rtWatchStates() {
     rt.stateWatcher = cloudDb.collection('mr_states').where({ roomId: rt.roomCode }).watch({
       onChange(snap) {
         const docs = snap.docs || [];
-        const other = docs.find(d => d.pid !== myPid());
-        const me = docs.find(d => d.pid === myPid());
-        if (me && me.finished !== undefined) { /* 自己的状态 */ }
-        if (other) remoteState = other;
+        rt.players = docs.map(d => ({ pid: d.pid, name: d.name || '玩家', isMe: d.pid === myPid() }));
+        remoteStates = docs.filter(d => d.pid !== myPid());
         if (rt.host && !rt.started && docs.length >= 2) {
           rt.canStart = true;
           if (rt.status.indexOf('可以开始') < 0) rt.status = '好友已加入，可以开始';
@@ -443,27 +460,32 @@ function rtPushState() {
     }).catch(() => {});
   } catch (e) {}
 }
+const RT_COLORS = ['#6cd0ff', '#ff9d3d', '#b06cff', '#52e0a0'];
 function rtDrawRemote() {
-  if (mode !== 'realtime' || !remoteState || !remoteState.y) return;
-  const tx = +remoteState.x || W / 2, ty = +remoteState.y || 0;
-  if (!remoteDraw) remoteDraw = { x: tx, y: ty };
-  remoteDraw.x += (tx - remoteDraw.x) * 0.25;
-  remoteDraw.y += (ty - remoteDraw.y) * 0.25;
-  const x = remoteDraw.x, y = remoteDraw.y;
-  ctx.save();
-  ctx.globalAlpha = 0.85;
-  ctx.fillStyle = '#6cd0ff'; ctx.shadowColor = '#6cd0ff'; ctx.shadowBlur = 18;
-  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = 'rgba(220,245,255,0.95)'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.stroke();
-  ctx.globalAlpha = 1;
-  ctx.font = 'bold 11px sans-serif'; ctx.fillStyle = '#cfefff'; ctx.textAlign = 'center';
-  ctx.fillText(remoteState.name || '好友', x, y - R - 8);
-  ctx.restore();
+  if (mode !== 'realtime' || !remoteStates.length) return;
+  remoteStates.forEach((st, i) => {
+    if (!st || !st.y) return;
+    const tx = +st.x || W / 2, ty = +st.y || 0;
+    let d = remoteDraws[st.pid];
+    if (!d) { d = remoteDraws[st.pid] = { x: tx, y: ty }; }
+    d.x += (tx - d.x) * 0.25;
+    d.y += (ty - d.y) * 0.25;
+    const color = RT_COLORS[i % RT_COLORS.length];
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(d.x, d.y, R, 0, TAU); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(235,248,255,0.95)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(d.x, d.y, R, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.font = 'bold 11px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
+    ctx.fillText(st.name || '玩家', d.x, d.y - R - 8);
+    ctx.restore();
+  });
 }
-function rtRemoteFinished() {
-  return !!(remoteState && remoteState.finished && +remoteState.finishTime > 0);
+function rtRemoteFinishTimes() {
+  return remoteStates.map(s => +s.finishTime).filter(t => t > 0);
 }
 
 /* ================= 幽灵轨迹压缩（无服务器，走分享卡 query） ================= */
@@ -733,7 +755,9 @@ function rotNearest(o, px, py) {
 /* ================= 弹珠 ================= */
 function makeBalls() {
   const jr = mulberry32(seed ^ 0x5f3759df);
-  const n = mode === 'level' ? LEVEL_BALLS : Math.max(1, ballCount);
+  const n = mode === 'level' ? LEVEL_BALLS
+    : mode === 'realtime' ? clamp(1 + (rt.aiCount || 0), 1, 10)
+    : Math.max(1, ballCount);
   const roster = BALL_POOL.map((e, i) => ({ name: customNames[i].trim() || e.name, color: e.color }));
   players = [];
   balls = [];
@@ -744,7 +768,7 @@ function makeBalls() {
     return balls;
   }
   const arr = activeDiff().ai, lo = arr[0], hi = arr[arr.length - 1];
-  const pSlots = [Math.floor((n - 1) / 2)];
+  const pSlots = mode === 'realtime' ? [0] : [Math.floor((n - 1) / 2)];
   const aiDefs = roster.slice(pSlots.length);
   let ai = 0;
   for (let i = 0; i < n; i++) {
@@ -1190,6 +1214,7 @@ function startRace(newSeed) {
   trackLen = mode === 'level' ? levelConfig(currentLevel).len : LENGTHS[lenKey].len;
   track = genTrack(seed, activeDiff().scale, trackLen);
   balls = makeBalls();
+  if (mode === 'realtime' && players[0]) players[0].name = rtName();
   ghostRecord = mode === 'invite' && players[0] ? [{ x: players[0].x, y: players[0].y }] : [];
   ghostRecT = 0;
   raceTime = 0; countdownT = 3.0; lastCount = 99; goT = -99;
@@ -1251,19 +1276,20 @@ function renderResults(final) {
     } else if (mode === 'realtime') {
       const p = players[0];
       const t = p.finished ? p.finishTime : 0;
-      const rt2 = rtRemoteFinished() ? +remoteState.finishTime : 0;
-      if (t > 0 && rt2 > 0) {
-        const diff = Math.abs(t - rt2);
-        if (t < rt2) {
+      const times = rtRemoteFinishTimes();
+      const best = times.length ? Math.min.apply(null, times) : 0;
+      if (t > 0 && best > 0) {
+        const diff = Math.abs(t - best);
+        if (t <= best) {
           resTitleText = '🏆 你赢了！';
-          resNoteText = '你的用时 ' + fmtT(t) + '，好友用时 ' + fmtT(rt2) + '，快了 ' + fmtT(diff);
+          resNoteText = '你的用时 ' + fmtT(t) + '，最快对手 ' + fmtT(best) + '，快了 ' + fmtT(diff);
         } else {
           resTitleText = '惜败！';
-          resNoteText = '你的用时 ' + fmtT(t) + '，好友用时 ' + fmtT(rt2) + '，慢了 ' + fmtT(diff);
+          resNoteText = '你的用时 ' + fmtT(t) + '，最快对手 ' + fmtT(best) + '，慢了 ' + fmtT(diff);
         }
       } else {
         resTitleText = '对局结束';
-        resNoteText = t > 0 ? '你的用时 ' + fmtT(t) + '，等待好友完成…' : '再来一局试试。';
+        resNoteText = t > 0 ? '你的用时 ' + fmtT(t) + '，等待其他玩家完成…' : '再来一局试试。';
       }
     } else if (mode === 'invite') {
       const p = players[0];
@@ -1985,53 +2011,102 @@ function drawRankUI() {
 /* ---------- 邀请好友界面 ---------- */
 function drawInviteUI() {
   ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
-  beginUILayer(580);
-  const px = 14, py = 10, pw = 402, ph = 560;
+  beginUILayer(660);
+  const px = 14, py = 10, pw = 402, ph = 640;
   fillRoundRect(px, py, pw, ph, 18, 'rgba(10,17,34,0.96)', '#2b3f6b', 1);
   const cx = UI_W / 2;
+  const bx0 = px + 16, bwAll = pw - 32;
   ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
-  ctx.fillText('邀请好友', cx, 48);
+  ctx.fillText('邀请好友', cx, 44);
 
-  // 两种对战方式
-  uiButton(cx - 160, 64, 155, 34, '幽灵对战', rt.tab === 'ghost', 'rt-tab', 'ghost', { font: 13 });
-  uiButton(cx + 5, 64, 155, 34, '实时对战', rt.tab === 'realtime', 'rt-tab', 'realtime', { font: 13 });
+  uiButton(cx - 160, 58, 155, 34, '幽灵对战', rt.tab === 'ghost', 'rt-tab', 'ghost', { font: 13 });
+  uiButton(cx + 5, 58, 155, 34, '实时对战', rt.tab === 'realtime', 'rt-tab', 'realtime', { font: 13 });
 
   if (rt.tab === 'realtime') {
     const left = rtLeft();
-    textCentered(rt.status || '创建房间后把卡片发给好友，双方同场实时竞速',
-      cx, 128, '12px sans-serif', rt.status ? '#ffd54a' : '#8ea6cf');
-    textCentered('今日剩余实时对战：' + left + ' / ' + RT_DAILY_LIMIT, cx, 152, '11px sans-serif', left ? '#7ec9a9' : '#ff8a8a');
-    if (rt.active && rt.roomCode) textCentered('房间号：' + rt.roomCode, cx, 178, '13px sans-serif', '#6cd0ff');
-    if (rt.active && rt.host) {
-      uiButton(cx - 150, 196, 300, 44, '分享房间卡给好友', false, 'rt-share', null, { radius: 10, font: 14 });
-      uiButton(cx - 150, 248, 300, 48, '开始对战 ▶', true, 'rt-start', null, { bold: true, font: 16, radius: 12 });
-      uiButton(cx - 150, 304, 300, 32, '换一条新赛道（重新建房）', false, 'rt-new', null, { radius: 10, font: 12 });
-      if (!rt.canStart) textCentered('等待好友加入后即可开始', cx, 354, '11px sans-serif', '#8ea6cf');
-    } else if (!rt.active) {
-      uiButton(cx - 150, 196, 300, 48, '创建房间并邀请好友', true, 'rt-create', null, { bold: true, font: 16, radius: 12 });
-      textCentered('每日最多 ' + RT_DAILY_LIMIT + ' 局，实时对战需要联网', cx, 262, '11px sans-serif', '#66809f');
+    textCentered(rt.status || '创建房间后分享给好友，最多 4 人同场竞速',
+      cx, 116, '12px sans-serif', rt.status ? '#ffd54a' : '#8ea6cf');
+    textCentered('今日剩余 ' + left + ' / ' + RT_DAILY_LIMIT + ' 局', cx, 138, '11px sans-serif', left ? '#7ec9a9' : '#ff8a8a');
+    if (rt.active && rt.roomCode) textCentered('房间号 ' + rt.roomCode + ' · 玩家 ' + rt.players.length + '/4', cx, 160, '12px sans-serif', '#6cd0ff');
+
+    // 玩家列表（自己可改名，他人只读）
+    textCentered('房间玩家（点击自己的名字可改名）', cx, 184, '11px sans-serif', '#7e97c4');
+    const shown = rt.players.slice(0, 4);
+    for (let i = 0; i < 4; i++) {
+      const y = 198 + i * 26;
+      const p = shown[i];
+      fillRoundRect(bx0, y, bwAll, 22, 7,
+        p && p.isMe ? 'rgba(108,208,255,0.16)' : 'rgba(13,23,48,0.9)',
+        p && p.isMe ? '#6cd0ff' : '#24365e', 1);
+      ctx.textAlign = 'left'; ctx.font = '12px sans-serif';
+      ctx.fillStyle = p ? (p.isMe ? '#6cd0ff' : '#dfe8ff') : '#4a5b7a';
+      ctx.fillText(p ? (p.name + (p.isMe ? '（我）' : '')) : '等待加入…', bx0 + 10, y + 15);
+      if (p && p.isMe) pushHit(bx0, y, bwAll, 22, 'rt-name');
     }
-    uiButton(cx - 70, 380, 140, 40, '返回', false, 'invite-back', null, { font: 14 });
+
+    // 房主可调 AI 数量
+    textCentered('AI 小球数量' + (rt.host ? '（房主设置）' : '（由房主设置）'), cx, 316, '11px sans-serif', '#7e97c4');
+    for (let i = 0; i <= 5; i++) {
+      const bw = (bwAll - 5 * 6) / 6;
+      const x = bx0 + i * (bw + 6);
+      uiButton(x, 328, bw, 30, String(i), rt.aiCount === i, rt.host ? 'rt-ai' : 'none', i, { font: 13 });
+    }
+
+    if (rt.active && rt.host) {
+      uiButton(cx - 150, 372, 300, 40, '分享房间卡给好友', false, 'rt-share', null, { radius: 10, font: 14 });
+      uiButton(cx - 150, 420, 300, 48, '开始对战 ▶', true, 'rt-start', null, { bold: true, font: 16, radius: 12 });
+      uiButton(cx - 150, 476, 300, 30, '换一条新赛道（重新建房）', false, 'rt-new', null, { radius: 10, font: 12 });
+      if (!rt.canStart) textCentered('至少 2 人加入后才能开始', cx, 524, '11px sans-serif', '#8ea6cf');
+    } else if (!rt.active) {
+      uiButton(cx - 150, 372, 300, 48, '创建房间并邀请好友', true, 'rt-create', null, { bold: true, font: 16, radius: 12 });
+      textCentered('最多 4 人，每日 ' + RT_DAILY_LIMIT + ' 局', cx, 434, '11px sans-serif', '#66809f');
+    } else {
+      textCentered('等待房主开始…', cx, 380, '12px sans-serif', '#8ea6cf');
+    }
+    uiButton(cx - 70, 552, 140, 38, '返回', false, 'invite-back', null, { font: 14 });
     endUILayer();
     return;
   }
 
+  // ===== 幽灵对战 =====
   const fromFriend = inviteTime > 0 || ghostSamples.length > 0;
-  textCentered(fromFriend ? '这是好友玩过的赛道 · 挑战好友成绩' : '双方在完全相同的赛道上比用时',
+  textCentered(fromFriend ? '这是好友玩过的赛道 · 挑战好友成绩' : '选好参数后分享邀请卡，同一条赛道比用时',
     cx, 116, '11px sans-serif', fromFriend ? '#ffd54a' : '#8ea6cf');
-  wrapText('点击「分享邀请卡」发给好友，对方点开卡片后会自动进入同一条赛道；跑完后把成绩再分享回去，就能比出胜负。',
-    px + 24, 138, pw - 48, 18, '12px sans-serif', '#c3d3ef');
 
-  textCentered('当前配置：' + LENGTHS[lenKey].label + ' · ' + AILVLS[diffKey].label + ' · ' + ballCount + ' 颗球',
-    cx, 208, '12px sans-serif', '#ffe9a8');
-  if (inviteTime > 0) textCentered('好友成绩：' + fmtT(inviteTime), cx, 228, '12px sans-serif', '#6cd0ff');
-  else if (inviteLastTime > 0) textCentered('我的成绩：' + fmtT(inviteLastTime), cx, 228, '12px sans-serif', '#6cd0ff');
-  if (ghostSamples.length) textCentered('好友幽灵已就位 · 比赛中会和它一起跑', cx, 248, '11px sans-serif', '#7ec9a9');
+  textCentered('赛道长度', cx, 142, '11px sans-serif', '#7e97c4');
+  const lens = [['short', '短 ≈40秒'], ['medium', '中 ≈1分30'], ['long', '长 ≈2分钟'], ['xl', '超长 ≈3分钟']];
+  const lw = (bwAll - 18) / 4;
+  lens.forEach((l, i) => uiButton(bx0 + i * (lw + 6), 154, lw, 30, l[1], lenKey === l[0], 'len', l[0], { font: 11 }));
 
-  uiButton(cx - 150, 264, 300, 50, '开始挑战 ▶', true, 'start-invite', null, { bold: true, font: 17, radius: 12 });
-  uiButton(cx - 150, 326, 300, 44, '分享邀请卡给好友', false, 'share-invite', null, { radius: 10, font: 14 });
-  uiButton(cx - 150, 378, 300, 36, '换一条新赛道', false, 'new-invite', null, { radius: 10, font: 13 });
-  uiButton(cx - 70, 428, 140, 40, '返回', false, 'invite-back', null, { font: 14 });
+  textCentered('AI 难度', cx, 198, '11px sans-serif', '#7e97c4');
+  const ais = [['easy', '简单'], ['normal', '普通'], ['hard', '困难'], ['nightmare', '噩梦']];
+  const aw = (bwAll - 18) / 4;
+  ais.forEach((a, i) => uiButton(bx0 + i * (aw + 6), 210, aw, 30, a[1], diffKey === a[0], 'ai', a[0], { font: 11 }));
+
+  textCentered('小球数量', cx, 254, '11px sans-serif', '#7e97c4');
+  const step = bwAll / 10;
+  for (let i = 1; i <= 10; i++) {
+    const ccx = bx0 + step * (i - 0.5), ccy = 274;
+    const on = ballCount === i;
+    ctx.beginPath(); ctx.arc(ccx, ccy, 13, 0, TAU);
+    ctx.fillStyle = on ? 'rgba(28,58,110,0.95)' : 'rgba(13,23,48,0.95)'; ctx.fill();
+    ctx.strokeStyle = on ? '#6cd0ff' : '#33508a'; ctx.lineWidth = on ? 2 : 1; ctx.stroke();
+    ctx.font = '12px sans-serif'; ctx.fillStyle = on ? '#fff' : '#9fb6df';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(i), ccx, ccy + 1);
+    ctx.textBaseline = 'alphabetic';
+    pushHit(ccx - 15, ccy - 15, 30, 30, 'count', i);
+  }
+
+  if (inviteTime > 0) textCentered('好友成绩：' + fmtT(inviteTime), cx, 308, '12px sans-serif', '#6cd0ff');
+  else if (inviteLastTime > 0) textCentered('我的成绩：' + fmtT(inviteLastTime), cx, 308, '12px sans-serif', '#6cd0ff');
+  else textCentered(LENGTHS[lenKey].label + ' · ' + AILVLS[diffKey].label + ' · ' + ballCount + ' 颗球', cx, 308, '12px sans-serif', '#ffe9a8');
+  if (ghostSamples.length) textCentered('好友幽灵已就位 · 比赛中会和它一起跑', cx, 328, '11px sans-serif', '#7ec9a9');
+
+  uiButton(cx - 150, 348, 300, 48, '开始挑战 ▶', true, 'start-invite', null, { bold: true, font: 17, radius: 12 });
+  uiButton(cx - 150, 404, 300, 40, '分享邀请卡给好友', false, 'share-invite', null, { radius: 10, font: 14 });
+  uiButton(cx - 150, 452, 300, 32, '换一条新赛道', false, 'new-invite', null, { radius: 10, font: 12 });
+  uiButton(cx - 70, 496, 140, 38, '返回', false, 'invite-back', null, { font: 14 });
   endUILayer();
 }
 
@@ -2182,8 +2257,24 @@ function applyName(v) {
   saveRoster();
   editingName = -1;
 }
-if (wx.onKeyboardConfirm) wx.onKeyboardConfirm(e => { applyName(e.value); try { wx.hideKeyboard(); } catch (err) {} });
-if (wx.onKeyboardComplete) wx.onKeyboardComplete(e => { applyName(e.value); });
+let rtEditingName = false;
+function handleKeyboard(v) {
+  if (rtEditingName) {
+    rtEditingName = false;
+    const t = (v || '').trim();
+    if (t) { store.set('mrName', t.slice(0, 6)); rtWritePresence(); }
+    return;
+  }
+  applyName(v);
+}
+function rtEditName() {
+  rtEditingName = true;
+  try {
+    wx.showKeyboard({ defaultValue: rtName(), maxLength: 6, multiple: false, confirmHold: false, confirmType: 'done' });
+  } catch (e) { rtEditingName = false; }
+}
+if (wx.onKeyboardConfirm) wx.onKeyboardConfirm(e => { handleKeyboard(e.value); try { wx.hideKeyboard(); } catch (err) {} });
+if (wx.onKeyboardComplete) wx.onKeyboardComplete(e => { handleKeyboard(e.value); });
 
 let sliderDragId = null;
 function handleUIHit(h, x, y) {
@@ -2228,6 +2319,13 @@ function handleUIHit(h, x, y) {
     case 'rt-create': rtCreateRoom(); return true;
     case 'rt-share': rtShareRoom(); return true;
     case 'rt-new': rtCreateRoom(); return true;
+    case 'rt-name': rtEditName(); return true;
+    case 'rt-ai':
+      if (rt.host && cloudDb && rt.docId) {
+        rt.aiCount = clamp(+h.data, 0, 5);
+        try { cloudDb.collection('mr_rooms').doc(rt.docId).update({ data: { aiCount: rt.aiCount } }).catch(() => {}); } catch (e) {}
+      }
+      return true;
     case 'rt-start':
       if (rt.host && rt.canStart && cloudDb && rt.docId) {
         try {
