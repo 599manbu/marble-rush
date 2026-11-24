@@ -1833,6 +1833,9 @@ function drawMenuUI() {
     textCentered('已解锁第 ' + levelProgress.unlocked + ' 关 · 已通关 ' + cleared + ' / ' + MAX_LEVEL,
       cx, 310, '12px sans-serif', '#ffe9a8');
     uiButton(cx - 120, 326, 240, 34, '选择关卡（第 ' + currentLevel + ' 关）', true, 'open-levels', null, { font: 13 });
+  } else if (mode === 'invite') {
+    textCentered('对战方式、赛道长度、难度与球数', cx, 300, '12px sans-serif', '#8ea6cf');
+    textCentered('都在「邀请好友」页里设置', cx, 324, '12px sans-serif', '#8ea6cf');
   } else {
     // 赛道长度
     textCentered('赛道长度', cx, 282, '11px sans-serif', '#7e97c4');
@@ -1851,6 +1854,8 @@ function drawMenuUI() {
   if (mode === 'level') {
     textCentered('小球数量', cx, 410, '11px sans-serif', '#7e97c4');
     textCentered('关卡模式固定 6 颗球', cx, 438, '13px sans-serif', '#ffe9a8');
+  } else if (mode === 'invite') {
+    // 邀请模式：数量与命名在邀请页设置，这里不显示
   } else {
     textCentered('小球数量（1-10，颜色各不相同）', cx, 410, '11px sans-serif', '#7e97c4');
     const step = bwAll / 10;
@@ -1869,7 +1874,8 @@ function drawMenuUI() {
     }
   }
 
-  // 选手命名
+  // 选手命名（邀请模式在邀请页里设置，主菜单不显示）
+  if (mode !== 'invite') {
   textCentered('选手命名（点击方框改名）', cx, 470, '11px sans-serif', '#7e97c4');
   const cols = 5, cellW = (bwAll - 4 * 6) / cols;
   const shownCount = mode === 'level' ? LEVEL_BALLS : ballCount;
@@ -1887,10 +1893,11 @@ function drawMenuUI() {
     ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
     pushHit(nx, ny, cellW, 30, 'name', i);
   }
+  }
 
   // 开始 / 设置
   const sbw = Math.min(260, bwAll - 40);
-  const sbx = cx - sbw / 2, sby = 560;
+  const sbx = cx - sbw / 2, sby = mode === 'invite' ? 392 : 560;
   const sg = ctx.createLinearGradient(sbx, sby, sbx + sbw, sby + 52);
   sg.addColorStop(0, '#ffd54a'); sg.addColorStop(1, '#ffb14a');
   fillRoundRect(sbx, sby, sbw, 52, 12, sg);
@@ -1900,14 +1907,15 @@ function drawMenuUI() {
   ctx.textBaseline = 'alphabetic';
   pushHit(sbx, sby, sbw, 52, mode === 'level' ? 'open-levels' : mode === 'invite' ? 'open-invite' : 'start');
 
-  const lbw = 118;
-  uiButton(cx - 185, 628, lbw, 34, '设置', false, 'open-settings', null, { font: 13 });
-  uiButton(cx - 59, 628, lbw, 34, '排行榜', false, 'open-rank', null, { font: 13 });
-  uiButton(cx + 67, 628, lbw, 34, '分享好友', false, 'share', null, { font: 13 });
+  const lbw = 118, lby = sby + 68;
+  uiButton(cx - 185, lby, lbw, 34, '设置', false, 'open-settings', null, { font: 13 });
+  uiButton(cx - 59, lby, lbw, 34, '排行榜', false, 'open-rank', null, { font: 13 });
+  uiButton(cx + 67, lby, lbw, 34, '分享好友', false, 'share', null, { font: 13 });
 
-  textCentered(bestText(), cx, 686, '12px sans-serif', '#7e97c4');
-  textCentered('关卡模式共 50 关，难度从噩梦起步逐关提升', cx, 716, '11px sans-serif', '#66809f');
-  textCentered('默认左右按钮操作 · 邀请好友同赛道比用时', cx, 736, '11px sans-serif', '#66809f');
+  textCentered(bestText(), cx, sby + 126, '12px sans-serif', '#7e97c4');
+  textCentered(mode === 'invite' ? '邀请页可选择幽灵对战或实时对战' : '关卡模式共 50 关，难度从噩梦起步逐关提升',
+    cx, sby + 156, '11px sans-serif', '#66809f');
+  textCentered('默认左右按钮操作 · 邀请好友同赛道比用时', cx, sby + 176, '11px sans-serif', '#66809f');
   endUILayer();
 }
 /* ---------- 关卡选择界面 ---------- */
