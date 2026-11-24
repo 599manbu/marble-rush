@@ -172,6 +172,7 @@ function uploadLevelStats(cb) {
     if (t > 0 && (!fastest || t < fastest)) fastest = t;
   }
   const done = () => { if (cb) cb(); };
+  uploadGlobalRank(cleared, fastest);
   try {
     if (wx.setUserCloudStorage) {
       wx.setUserCloudStorage({
@@ -575,6 +576,8 @@ function drawGhostBall() {
   ctx.restore();
 }
 let rankFrom = 'menu';
+let rankTab = 'friends';          // friends | global
+let globalRank = [], globalLoading = false, globalErr = '';
 let simTime = 0, raceTime = 0, countdownT = 0, goT = -99, lastCount = 99;
 let seed = (Math.random() * 1e9) | 0, lenKey = 'medium', diffKey = 'normal';
 let trackLen = LENGTHS.medium.len;
@@ -1965,8 +1968,38 @@ function drawLevelsUI() {
 }
 
 /* ---------- 好友排行榜界面 ---------- */
+function uploadGlobalRank(cleared, fastest) {
+  if (!initCloud() || !cloudDb) return;
+  try {
+    cloudDb.collection('mr_ranks').doc(myPid()).set({
+      data: {
+        name: rtName(),
+        lv: cleared,
+        best: Math.round((fastest || 0) * 100) / 100,
+        updatedAt: Date.now(),
+      },
+    }).catch(() => {});
+  } catch (e) {}
+}
+function fetchGlobalRank() {
+  if (!initCloud() || !cloudDb) { globalErr = '云开发未初始化'; return; }
+  globalLoading = true; globalErr = '';
+  try {
+    cloudDb.collection('mr_ranks').orderBy('lv', 'desc').limit(50).get().then(res => {
+      globalRank = (res.data || []).map(d => ({
+        name: d.name || '玩家', lv: +d.lv || 0, best: +d.best || 0, isMe: d._id === myPid(),
+      }));
+      globalRank.sort((a, b) => (b.lv - a.lv) || ((a.best || 1e9) - (b.best || 1e9)));
+      globalLoading = false;
+    }).catch(e => {
+      globalLoading = false;
+      globalErr = '读取全服排行失败';
+    });
+  } catch (e) { globalLoading = false; globalErr = '读取全服排行失败'; }
+}
 function enterRank() {
   screen = 'rank';
+  if (rankTab === 'global') fetchGlobalRank();
   try {
     const oc = wx.getOpenDataContext ? wx.getOpenDataContext() : null;
     if (!oc) return;
@@ -1985,33 +2018,60 @@ function drawRankUI() {
   const px = 14, py = 10, pw = 402, ph = 750;
   fillRoundRect(px, py, pw, ph, 18, 'rgba(10,17,34,0.96)', '#2b3f6b', 1);
   const cx = UI_W / 2;
-  ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
-  ctx.fillText('好友排行', cx, 54);
-  textCentered('按已通关关卡数排序，同关卡数比最快通关用时', cx, 80, '11px sans-serif', '#8ea6cf');
 
-  const rx = 24, ry = 100, rw = 382, rh = 520;
+  uiButton(cx - 160, 44, 155, 34, '好友排行榜', rankTab === 'friends', 'rank-tab', 'friends', { font: 13 });
+  uiButton(cx + 5, 44, 155, 34, '全服排行榜', rankTab === 'global', 'rank-tab', 'global', { font: 13 });
+  textCentered('按已通关关卡数排序，同关卡数比最快通关用时', cx, 100, '11px sans-serif', '#8ea6cf');
+
+  const rx = 24, ry = 116, rw = 382, rh = 496;
   fillRoundRect(rx, ry, rw, rh, 12, 'rgba(8,14,28,0.6)', '#24365e', 1);
-  let drew = false;
-  try {
-    const oc = wx.getOpenDataContext ? wx.getOpenDataContext() : null;
-    if (oc && oc.canvas && oc.canvas.width > 0) {
-      ctx.drawImage(oc.canvas, rx, ry, rw, rh);
-      drew = true;
+
+  if (rankTab === 'friends') {
+    let drew = false;
+    try {
+      const oc = wx.getOpenDataContext ? wx.getOpenDataContext() : null;
+      if (oc && oc.canvas && oc.canvas.width > 0) {
+        ctx.drawImage(oc.canvas, rx, ry, rw, rh);
+        drew = true;
+      }
+    } catch (e) { /* 忽略 */ }
+    if (!drew) textCentered('排行榜需在小游戏真机环境中查看', cx, ry + rh / 2, '12px sans-serif', '#8ea6cf');
+  } else {
+    if (globalErr) {
+      textCentered(globalErr, cx, ry + rh / 2, '12px sans-serif', '#ff8a8a');
+    } else if (!globalRank.length) {
+      textCentered(globalLoading ? '正在读取全服排行…' : '还没有玩家上榜', cx, ry + rh / 2, '12px sans-serif', '#8ea6cf');
+      if (!globalLoading) textCentered('通关关卡后会自动上传成绩', cx, ry + rh / 2 + 22, '11px sans-serif', '#66809f');
+    } else {
+      const rowH = 38, n = Math.min(globalRank.length, 12);
+      for (let i = 0; i < n; i++) {
+        const u = globalRank[i], y = ry + 8 + i * rowH;
+        if (u.isMe) { ctx.fillStyle = 'rgba(108,208,255,0.14)'; ctx.fillRect(rx + 4, y, rw - 8, rowH - 4); }
+        else if (i % 2 === 0) { ctx.fillStyle = 'rgba(18,30,56,0.55)'; ctx.fillRect(rx + 4, y, rw - 8, rowH - 4); }
+        ctx.textAlign = 'center'; ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = i === 0 ? '#ffd54a' : i === 1 ? '#dfe8ff' : i === 2 ? '#ff9d3d' : '#7e97c4';
+        ctx.fillText(String(i + 1), rx + 22, y + 24);
+        ctx.textAlign = 'left'; ctx.font = '13px sans-serif';
+        ctx.fillStyle = u.isMe ? '#6cd0ff' : '#e8f0ff';
+        ctx.fillText(u.isMe ? u.name + '（我）' : u.name, rx + 44, y + 17);
+        ctx.font = '11px sans-serif'; ctx.fillStyle = '#8ea6cf';
+        ctx.fillText('已通关 ' + u.lv + ' 关', rx + 44, y + 32);
+        ctx.textAlign = 'right'; ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#6cd0ff';
+        ctx.fillText(u.best ? fmtT(u.best) : '--:--', rx + rw - 14, y + 24);
+        ctx.textAlign = 'left';
+      }
     }
-  } catch (e) { /* 忽略 */ }
-  if (!drew) {
-    textCentered('排行榜需在小游戏真机环境中查看', cx, ry + rh / 2, '12px sans-serif', '#8ea6cf');
   }
-  // 本机成绩：用于确认自己是否已上传
+
   const cleared = Object.keys(levelProgress.best).length;
   let fastest = 0;
   for (const k in levelProgress.best) {
     const t = +levelProgress.best[k] || 0;
     if (t > 0 && (!fastest || t < fastest)) fastest = t;
   }
-  textCentered('我：已通关 ' + cleared + ' 关 · 最快 ' + (fastest ? fmtT(fastest) : '--:--'), cx, 632, '11px sans-serif', '#7ec9a9');
+  textCentered('我：已通关 ' + cleared + ' 关 · 最快 ' + (fastest ? fmtT(fastest) : '--:--'), cx, 628, '11px sans-serif', '#7ec9a9');
 
-  uiButton(cx - 150, 640, 300, 38, '刷新', false, 'rank-refresh', null, { font: 13 });
+  uiButton(cx - 150, 640, 300, 36, '刷新', false, 'rank-refresh', null, { font: 13 });
   uiButton(cx - 70, 690, 140, 38, '返回', false, 'rank-back', null, { font: 14 });
   endUILayer();
 }
@@ -2347,8 +2407,19 @@ function handleUIHit(h, x, y) {
       screen = rankFrom === 'levels' ? 'levels' : 'menu';
       try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'hide' }); } catch (e) {}
       return true;
+    case 'rank-tab':
+      rankTab = h.data;
+      if (rankTab === 'global') fetchGlobalRank();
+      else {
+        try {
+          const oc = wx.getOpenDataContext && wx.getOpenDataContext();
+          if (oc) oc.postMessage({ type: 'refresh' });
+        } catch (e) {}
+      }
+      return true;
     case 'rank-refresh':
       uploadLevelStats();
+      if (rankTab === 'global') fetchGlobalRank();
       try {
         const oc = wx.getOpenDataContext && wx.getOpenDataContext();
         if (oc) {
