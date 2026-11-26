@@ -116,12 +116,20 @@ const BALL_POOL = [                 // 默认名字：四字吉祥话，与球�
 ];
 let ballCount = 6;
 let customNames = BALL_POOL.map(e => e.name);
+const OLD_DEFAULT_NAMES = ['你', '赤焰', '碧波', '紫电', '翠影', '橙旋', '白霜', '青岚', '粉黛', '琥珀'];
 function saveRoster() { store.set('marbleRoster', { c: ballCount, n: customNames }); }
 function loadRoster() {
   const r = store.get('marbleRoster', null);
   if (r && Array.isArray(r.n)) {
     ballCount = clamp(+r.c || 6, 1, 10);
-    customNames = BALL_POOL.map((e, i) => (typeof r.n[i] === 'string' && r.n[i].trim()) ? r.n[i].slice(0, 6) : e.name);
+    customNames = BALL_POOL.map((e, i) => {
+      const v = (typeof r.n[i] === 'string') ? r.n[i].trim() : '';
+      if (!v) return e.name;
+      // 旧版默认名（两字）自动换成新的四字吉祥话
+      if (v === OLD_DEFAULT_NAMES[i]) return e.name;
+      return v.slice(0, 6);
+    });
+    saveRoster();
   }
 }
 const LENGTHS = {
@@ -1876,6 +1884,9 @@ function drawMenuUI() {
   } else if (mode === 'invite') {
     textCentered('对战方式、赛道长度、难度与球数', cx, 300, '12px sans-serif', '#8ea6cf');
     textCentered('都在「邀请好友」页里设置', cx, 324, '12px sans-serif', '#8ea6cf');
+  } else if (mode === 'solo') {
+    textCentered('赛道长度、AI 难度、AI 数量', cx, 288, '12px sans-serif', '#8ea6cf');
+    textCentered('点「开始设置」后分三步选择', cx, 310, '12px sans-serif', '#8ea6cf');
   } else {
     // 赛道长度
     textCentered('赛道长度', cx, 282, '11px sans-serif', '#7e97c4');
@@ -1894,8 +1905,8 @@ function drawMenuUI() {
   if (mode === 'level') {
     textCentered('小球数量', cx, 410, '11px sans-serif', '#7e97c4');
     textCentered('关卡模式固定 6 颗球', cx, 438, '13px sans-serif', '#ffe9a8');
-  } else if (mode === 'invite') {
-    // 邀请模式：数量与命名在邀请页设置，这里不显示
+  } else if (mode === 'invite' || mode === 'solo') {
+    // 邀请模式在邀请页设置；单人模式在分步向导里设置
   } else {
     textCentered('小球数量（1-10，颜色各不相同）', cx, 410, '11px sans-serif', '#7e97c4');
     const step = bwAll / 10;
@@ -1916,36 +1927,44 @@ function drawMenuUI() {
 
   // 选手命名（邀请模式在邀请页里设置，主菜单不显示）
   if (mode !== 'invite') {
-  textCentered('选手命名（点击方框改名）', cx, 470, '11px sans-serif', '#7e97c4');
-  const cols = 5, cellW = (bwAll - 4 * 6) / cols;
+  const big = mode === 'solo';
+  const labelY = big ? 316 : 470;
+  const rowH = big ? 42 : 30;
+  const rowGap = big ? 48 : 36;
+  const nameFont = big ? 15 : 11;
+  const cols = big ? 4 : 5;
+  textCentered('选手命名（点击方框改名）', cx, labelY, big ? '12px sans-serif' : '11px sans-serif', '#7e97c4');
+  const cellW = (bwAll - (cols - 1) * 6) / cols;
   const shownCount = mode === 'level' ? LEVEL_BALLS : ballCount;
   for (let i = 0; i < 10; i++) {
     const r = Math.floor(i / cols), c = i % cols;
-    const nx = bx0 + c * (cellW + 6), ny = 480 + r * 36;
+    const nx = bx0 + c * (cellW + 6), ny = labelY + 10 + r * rowGap;
     const on = i < shownCount;
-    fillRoundRect(nx, ny, cellW, 30, 8, '#0d1730', '#24365e', 1);
+    fillRoundRect(nx, ny, cellW, rowH, 8, '#0d1730', '#24365e', 1);
     ctx.globalAlpha = on ? 1 : 0.32;
     ctx.fillStyle = BALL_POOL[i].color;
-    ctx.beginPath(); ctx.arc(nx + 11, ny + 15, 5, 0, TAU); ctx.fill();
-    ctx.font = '11px sans-serif'; ctx.fillStyle = '#e8f0ff';
+    ctx.beginPath(); ctx.arc(nx + (big ? 12 : 11), ny + rowH / 2, big ? 6 : 5, 0, TAU); ctx.fill();
+    ctx.font = nameFont + 'px sans-serif'; ctx.fillStyle = '#e8f0ff';
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillText(customNames[i], nx + 21, ny + 16);
+    ctx.fillText(customNames[i], nx + (big ? 23 : 21), ny + rowH / 2 + 1);
     ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
-    pushHit(nx, ny, cellW, 30, 'name', i);
+    pushHit(nx, ny, cellW, rowH, 'name', i);
   }
   }
 
   // 开始 / 设置
   const sbw = Math.min(260, bwAll - 40);
-  const sbx = cx - sbw / 2, sby = mode === 'invite' ? 392 : 560;
+  const sbx = cx - sbw / 2;
+  const sby = mode === 'invite' ? 392 : mode === 'solo' ? 500 : 560;
   const sg = ctx.createLinearGradient(sbx, sby, sbx + sbw, sby + 52);
   sg.addColorStop(0, '#ffd54a'); sg.addColorStop(1, '#ffb14a');
   fillRoundRect(sbx, sby, sbw, 52, 12, sg);
   ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#08111f';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(mode === 'level' ? '选择关卡 ▶' : mode === 'invite' ? '邀请好友 ▶' : '开始比赛 ▶', cx, sby + 27);
+  ctx.fillText(mode === 'level' ? '选择关卡 ▶' : mode === 'invite' ? '邀请好友 ▶' : mode === 'solo' ? '开始设置 ▶' : '开始比赛 ▶', cx, sby + 27);
   ctx.textBaseline = 'alphabetic';
-  pushHit(sbx, sby, sbw, 52, mode === 'level' ? 'open-levels' : mode === 'invite' ? 'open-invite' : 'start');
+  pushHit(sbx, sby, sbw, 52,
+    mode === 'level' ? 'open-levels' : mode === 'invite' ? 'open-invite' : mode === 'solo' ? 'setup-open' : 'start');
 
   const lbw = 118, lby = sby + 68;
   uiButton(cx - 185, lby, lbw, 34, '设置', false, 'open-settings', null, { font: 13 });
@@ -1958,6 +1977,48 @@ function drawMenuUI() {
   textCentered('默认左右按钮操作 · 邀请好友同赛道比用时', cx, sby + 176, '11px sans-serif', '#66809f');
   endUILayer();
 }
+/* ---------- 单人模式分步设置 ---------- */
+function drawSetupUI() {
+  ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
+  beginUILayer(600);
+  const px = 14, py = 10, pw = 402, ph = 580;
+  fillRoundRect(px, py, pw, ph, 18, 'rgba(10,17,34,0.96)', '#2b3f6b', 1);
+  const cx = UI_W / 2;
+  const step = screen === 'setup1' ? 1 : screen === 'setup2' ? 2 : 3;
+  const title = step === 1 ? '选择赛道' : step === 2 ? '选择 AI 难度' : '选择 AI 数量';
+
+  ctx.font = 'bold 26px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
+  ctx.fillText(title, cx, 62);
+  textCentered('第 ' + step + ' / 3 步', cx, 92, '12px sans-serif', '#6cd0ff');
+
+  if (step === 1) {
+    const lens = [['short', '短道 · 约 40 秒'], ['medium', '中道 · 约 1 分 30'], ['long', '长道 · 约 2 分钟'], ['xl', '超长 · 约 3 分钟']];
+    lens.forEach((l, i) => {
+      uiButton(px + 50, 126 + i * 70, pw - 100, 56, l[1], lenKey === l[0], 'setup-len', l[0], { font: 17, radius: 14 });
+    });
+  } else if (step === 2) {
+    const ais = [['easy', '简单 · 轻松上手'], ['normal', '普通 · 标准强度'], ['hard', '困难 · 机关更密'], ['nightmare', '噩梦 · 高手挑战']];
+    ais.forEach((a, i) => {
+      uiButton(px + 50, 126 + i * 70, pw - 100, 56, a[1], diffKey === a[0], 'setup-ai', a[0], { font: 17, radius: 14 });
+    });
+  } else {
+    textCentered('AI 小球数量（总球数 = AI 数量 + 你）', cx, 124, '12px sans-serif', '#8ea6cf');
+    const cols = 5, gap = 8;
+    const cellW = (pw - 80 - gap * (cols - 1)) / cols;
+    for (let i = 0; i < 10; i++) {
+      const r = Math.floor(i / cols), c = i % cols;
+      const x = px + 40 + c * (cellW + gap), y = 146 + r * 62;
+      const on = ballCount - 1 === i;
+      uiButton(x, y, cellW, 50, String(i), on, 'setup-count', i, { font: 20, radius: 12 });
+    }
+    textCentered('当前：' + (ballCount - 1) + ' 个 AI + 你 = ' + ballCount + ' 颗球', cx, 286, '12px sans-serif', '#ffe9a8');
+  }
+
+  uiButton(cx - 70, 448, 140, 40, step === 1 ? '返回' : '上一步', false, 'setup-back', null, { font: 14 });
+  if (step === 3) textCentered('点击数字立即开始比赛', cx, 508, '11px sans-serif', '#66809f');
+  endUILayer();
+}
+
 /* ---------- 关卡选择界面 ---------- */
 function drawLevelsUI() {
   ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
@@ -2465,6 +2526,18 @@ function handleUIHit(h, x, y) {
     case 'count': ballCount = h.data; saveRoster(); return true;
     case 'name': editName(h.data); return true;
     case 'start': if (mode === 'invite') startInviteRace(); else startRace(false); return true;
+    case 'setup-open': screen = 'setup1'; return true;
+    case 'setup-len': lenKey = h.data; screen = 'setup2'; return true;
+    case 'setup-ai': diffKey = h.data; screen = 'setup3'; return true;
+    case 'setup-count':
+      ballCount = clamp((+h.data || 0) + 1, 1, 10);
+      saveRoster();
+      screen = 'menu';
+      startRace(false);
+      return true;
+    case 'setup-back':
+      screen = screen === 'setup1' ? 'menu' : screen === 'setup2' ? 'setup1' : 'setup2';
+      return true;
     case 'open-levels':
       mode = 'level';
       screen = 'levels';
@@ -2665,6 +2738,7 @@ function render() {
     if (screen === 'levels') drawLevelsUI();
     else if (screen === 'invite') drawInviteUI();
     else if (screen === 'rank') drawRankUI();
+    else if (screen === 'setup1' || screen === 'setup2' || screen === 'setup3') drawSetupUI();
     else drawMenuUI();
   }
   if (resultsVisible && !settingsOpen) drawResultsUI();
