@@ -2,6 +2,7 @@
   "appid": "touristappid",
   "compileType": "game",
   "projectname": "marble-rush",
+  "cloudfunctionRoot": "cloudfunctions/",
   "libVersion": "latest",
   "setting": {
     "es6": true,

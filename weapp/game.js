@@ -102,17 +102,17 @@ const GY = 560;
 const DRAG = 1.05;
 const MAXV = 950;
 const GOLD = '#ffd54a', CYAN = '#6cd0ff';
-const BALL_POOL = [
-  { name: '你', color: '#ffd54a' },
-  { name: '赤焰', color: '#ff5d5d' },
-  { name: '碧波', color: '#4da3ff' },
-  { name: '紫电', color: '#b06cff' },
-  { name: '翠影', color: '#52e0a0' },
-  { name: '橙旋', color: '#ff9d3d' },
-  { name: '白霜', color: '#dfe8ff' },
-  { name: '青岚', color: '#35d0e8' },
-  { name: '粉黛', color: '#ff7ac8' },
-  { name: '琥珀', color: '#cd8b45' },
+const BALL_POOL = [                 // 默认名字：四字吉祥话，与球的颜色呼应
+  { name: '一马当先', color: '#ffd54a' },   // 金
+  { name: '红红火火', color: '#ff5d5d' },   // 红
+  { name: '海阔天空', color: '#4da3ff' },   // 蓝
+  { name: '紫气东来', color: '#b06cff' },   // 紫
+  { name: '青山绿水', color: '#52e0a0' },   // 绿
+  { name: '心想事成', color: '#ff9d3d' },   // 橙
+  { name: '白玉无瑕', color: '#dfe8ff' },   // 白
+  { name: '青云直上', color: '#35d0e8' },   // 青
+  { name: '花好月圆', color: '#ff7ac8' },   // 粉
+  { name: '金玉满堂', color: '#cd8b45' },   // 琥珀
 ];
 let ballCount = 6;
 let customNames = BALL_POOL.map(e => e.name);
@@ -2410,14 +2410,41 @@ function applyName(v) {
   editingName = -1;
 }
 let rtEditingName = false;
-function handleKeyboard(v) {
-  if (rtEditingName) {
-    rtEditingName = false;
-    const t = (v || '').trim();
-    if (t) { store.set('mrName', t.slice(0, 6)); rtWritePresence(); }
+function toast(msg) {
+  try { wx.showToast({ title: msg, icon: 'none', duration: 1800 }); } catch (e) {}
+}
+// 昵称内容安全检测（云函数 msgSecCheck）
+function checkName(text, cb) {
+  if (!initCloud() || !wx.cloud || !wx.cloud.callFunction) {
+    cb(false, '名称校验服务不可用，请稍后重试');
     return;
   }
-  applyName(v);
+  wx.cloud.callFunction({ name: 'msgSecCheck', data: { content: text, scene: 1 } })
+    .then(res => {
+      const r = (res && res.result) || {};
+      cb(!!r.pass, r.pass ? '' : (r.reason === 'risky' ? '名称包含违规内容' : '名称校验失败，请重试'));
+    })
+    .catch(() => cb(false, '名称校验失败，请重试'));
+}
+function handleKeyboard(v) {
+  const t = (v || '').trim();
+  if (rtEditingName) {
+    rtEditingName = false;
+    if (!t) return;
+    checkName(t, (ok, msg) => {
+      if (ok) { store.set('mrName', t.slice(0, 6)); rtWritePresence(); }
+      else toast(msg);
+    });
+    return;
+  }
+  if (editingName < 0) return;
+  if (!t) { applyName(''); return; }
+  const idx = editingName;
+  editingName = -1;
+  checkName(t, (ok, msg) => {
+    if (ok) { customNames[idx] = t.slice(0, 6); saveRoster(); }
+    else toast(msg);
+  });
 }
 function rtEditName() {
   rtEditingName = true;
