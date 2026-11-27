@@ -271,15 +271,16 @@ function uploadLevelStats(cb) {
   // 未授权微信资料：只保存在本机，不上榜
   if (!profile.auth) { if (cb) cb(); return; }
   const keys = Object.keys(levelProgress.best);
-  const cleared = keys.length;
-  let fastest = 0;
+  let cleared = 0, fastest = 0;
   for (const k of keys) {
-    const t = +levelProgress.best[k] || 0;
-    if (t > 0 && (!fastest || t < fastest)) fastest = t;
+    const lv = +k, t = +levelProgress.best[k] || 0;
+    // 超过该关标准时间的成绩不计入排行榜
+    if (t <= 0 || t > levelPar(lv)) continue;
+    cleared++;
+    if (!fastest || t < fastest) fastest = t;
   }
   const done = () => { if (cb) cb(); };
-  // 一关都没通关：不上榜
-  if (cleared <= 0) { done(); return; }
+  if (cleared <= 0 || !fastest) { done(); return; }
   uploadGlobalRank(cleared, fastest);
   try {
     if (wx.setUserCloudStorage) {
@@ -734,6 +735,8 @@ function drawGhostBall() {
   ctx.restore();
 }
 let rankFrom = 'menu';
+// 关卡标准时间（秒）：超过标准时间的通关不计入排行榜
+function levelPar(lv) { return 90 + (clamp(lv, 1, MAX_LEVEL) - 1) * 0.6; }
 let setupMode = 'solo';           // 分步设置来自哪个模式
 let pendingRank = false;          // 授权成功后自动进入排行榜
 let rankTab = 'friends';          // friends | global
@@ -1461,6 +1464,8 @@ function renderResults(final) {
         resNoteText = '第 ' + currentLevel + ' 关需要进入前三名才能解锁下一关，再试一次吧！';
       }
       if (!profile.auth) resNoteText += ' 授权微信后可上榜。';
+      if (players[0].finished && players[0].finishTime > levelPar(currentLevel))
+        resNoteText += ' 超过本关标准时间 ' + fmtT(levelPar(currentLevel)) + '，本次不计入排行榜。';
     } else if (mode === 'realtime') {
       const p = players[0];
       const t = p.finished ? p.finishTime : 0;
@@ -2175,7 +2180,7 @@ function drawLevelsUI() {
 
 /* ---------- 好友排行榜界面 ---------- */
 function uploadGlobalRank(cleared, fastest) {
-  if (cleared <= 0) return;
+  if (cleared <= 0 || !fastest) return;
   if (!initCloud() || !cloudDb) return;
   try {
     cloudDb.collection('mr_ranks').doc(myPid()).set({
@@ -2200,7 +2205,7 @@ function fetchGlobalRank() {
       globalRank = (res.data || []).map(d => ({
         name: d.name || '玩家', avatarUrl: d.avatarUrl || '',
         lv: +d.lv || 0, best: +d.best || 0, isMe: d._id === myPid(),
-      })).filter(u => u.lv > 0);
+      })).filter(u => u.lv > 0 && u.best > 0);
       const idx = globalRank.findIndex(u => u.isMe);
       globalSelf.inTop = idx >= 0;
       if (idx >= 0) {
@@ -2214,7 +2219,7 @@ function fetchGlobalRank() {
           const d = r.data || {};
           const lv = +d.lv || 0, best = +d.best || 0;
           globalSelf.lv = lv; globalSelf.best = best;
-          if (lv <= 0) return null;              // 未通关：不上榜
+          if (lv <= 0 || !best) return null;   // 没有达标成绩：不上榜
           return Promise.all([
             col.where({ lv: _.gt(lv) }).count(),
             col.where({ lv: lv, best: _.lt(best || 999999) }).count(),
@@ -2260,7 +2265,7 @@ function drawRankUI() {
   if (!profile.auth) {
     uiButton(cx - 165, 88, 330, 26, '未授权 · 点击授权并上传成绩', true, 'rank-auth', null, { font: 12 });
   } else {
-    textCentered(rankTab === 'global' ? '全服前 100 名 · 按通关数与最快用时排序' : '好友 · 按通关数与最快用时排序',
+    textCentered((rankTab === 'global' ? '全服前 100 名' : '好友') + ' · 通关数优先 · 需在赛道标准时间内',
       cx, 100, '11px sans-serif', '#8ea6cf');
   }
 
@@ -2334,7 +2339,7 @@ function drawRankUI() {
         + (globalSelf.lv || 0) + ' 关 · 最快 ' + (globalSelf.best ? fmtT(globalSelf.best) : '--:--')
         + (globalSelf.inTop ? '' : '（未进前 100）');
     } else {
-      selfLine = '我：已通关 ' + cleared + ' 关 · 最快 ' + (fastest ? fmtT(fastest) : '--:--') + '（通关后上传）';
+      selfLine = '我：已通关 ' + cleared + ' 关 · 最快 ' + (fastest ? fmtT(fastest) : '--:--') + '（暂无达标成绩）';
     }
   } else {
     selfLine = '我：已通关 ' + cleared + ' 关 · 最快 ' + (fastest ? fmtT(fastest) : '--:--');
