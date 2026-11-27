@@ -84,14 +84,25 @@ let settings = { ctrl: 'btn', vol: 0.45, mute: false };
 let settingsOpen = false;
 
 /* ================= 玩家资料（头像 / 昵称） ================= */
-let profile = { name: '', avatarUrl: '' };
+let profile = { name: '', avatarUrl: '', auth: false };
+let ballName = '';                  // 小球名字（每局可改，赛后恢复）
 const avatarCache = {};
+function genProfileName() {
+  return '玩家' + String(100000 + Math.floor(Math.random() * 900000));
+}
 function loadProfile() {
   const p = store.get('mrProfile', null);
   if (p && typeof p === 'object') {
     profile.name = p.name || '';
     profile.avatarUrl = p.avatarUrl || '';
+    profile.auth = !!p.auth;
   }
+  // 未授权微信资料时，用固定的“玩家XXXXXX”作为排行榜名字
+  if (!profile.name) {
+    profile.name = genProfileName();
+    saveProfile();
+  }
+  ballName = profile.name;
 }
 function saveProfile() { store.set('mrProfile', profile); }
 function avatarImg(url) {
@@ -109,10 +120,13 @@ function avatarImg(url) {
 function authProfile() {
   const apply = (u) => {
     if (!u) return;
-    profile.name = u.nickName || profile.name;
-    profile.avatarUrl = u.avatarUrl || profile.avatarUrl;
+    if (u.nickName) profile.name = u.nickName;
+    if (u.avatarUrl) profile.avatarUrl = u.avatarUrl;
+    profile.auth = true;
     saveProfile();
-    if (profile.name) store.set('mrName', profile.name.slice(0, 6));
+    // 小球名字默认跟随微信名；排行榜名字也同步为微信名
+    ballName = profile.name;
+    customNames[0] = ballName;
     toast('已获取微信头像和昵称');
   };
   try {
@@ -145,7 +159,7 @@ function drawProfileCard(y) {
   ctx.restore();
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#e8f0ff';
-  ctx.fillText(profile.name || rtName(), ax + r * 2 + 12, y + 32);
+  ctx.fillText(profile.name, ax + r * 2 + 12, y + 32);
   const soloBest = +store.get('mrSoloBest', 0) || 0;
   ctx.font = '11px sans-serif'; ctx.fillStyle = '#8ea6cf';
   ctx.fillText('单人历史最快：' + (soloBest ? fmtT(soloBest) : '--:--.-'), ax + r * 2 + 12, y + 52);
@@ -354,10 +368,7 @@ let rt = {
 };
 let rtPendingRoom = '';
 function rtName() {
-  let n = store.get('mrName', '');
-  if (!n) n = profile.name || '';
-  if (!n) n = '玩家' + (1000 + Math.floor(Math.random() * 9000));
-  return n;
+  return ballName || profile.name || genProfileName();
 }
 function myPid() {
   let p = store.get('mrPid', '');
@@ -1352,6 +1363,7 @@ function startRace(newSeed) {
   else if (newSeed) seed = (Math.random() * 1e9) | 0;
   trackLen = mode === 'level' ? levelConfig(currentLevel).len : LENGTHS[lenKey].len;
   track = genTrack(seed, activeDiff().scale, trackLen);
+  if (mode !== 'spectate') customNames[0] = ballName || profile.name;
   balls = makeBalls();
   if (mode === 'realtime' && players[0]) {
     players[0].name = rtName();
@@ -1380,6 +1392,10 @@ function goMenu() {
   state = 'menu'; paused = false; backPrompt = false;
   settingsOpen = false; resultsVisible = false;
   screen = 'menu';
+  // 新一局开始前，小球名字恢复为排行榜名字
+  ballName = profile.name;
+  customNames[0] = ballName;
+  saveRoster();
   btnPresses.clear(); syncBtnState();
   particles.length = 0;
 }
@@ -1401,6 +1417,12 @@ function renderResults(final) {
   const st = resultsList();
   if (final) {
     resultsFinal = true; state = 'results';
+    // 下一局小球名字恢复为排行榜名字（本局已结束，不影响当前显示）
+    if (mode !== 'spectate') {
+      ballName = profile.name;
+      customNames[0] = ballName;
+      saveRoster();
+    }
     const winner = st[0];
     if (mode === 'spectate') {
       resTitleText = '🏆 ' + winner.name + ' 夺冠！';
@@ -2141,7 +2163,7 @@ function uploadGlobalRank(cleared, fastest) {
   try {
     cloudDb.collection('mr_ranks').doc(myPid()).set({
       data: {
-        name: profile.name || rtName(),
+        name: profile.name,
         avatarUrl: profile.avatarUrl || '',
         lv: cleared,
         best: Math.round((fastest || 0) * 100) / 100,
@@ -2588,8 +2610,12 @@ function handleKeyboard(v) {
     rtEditingName = false;
     if (!t) return;
     checkName(t, (ok, msg) => {
-      if (ok) { store.set('mrName', t.slice(0, 6)); rtWritePresence(); }
-      else toast(msg);
+      if (ok) {
+        ballName = t.slice(0, 6);
+        customNames[0] = ballName;
+        saveRoster();
+        rtWritePresence();     // 只更新房间里的显示名，不改排行榜名字
+      } else toast(msg);
     });
     return;
   }
@@ -2598,8 +2624,11 @@ function handleKeyboard(v) {
   const idx = editingName;
   editingName = -1;
   checkName(t, (ok, msg) => {
-    if (ok) { customNames[idx] = t.slice(0, 6); saveRoster(); }
-    else toast(msg);
+    if (ok) {
+      customNames[idx] = t.slice(0, 6);
+      if (idx === 0) ballName = customNames[0];   // 只改小球名字，不改排行榜名字
+      saveRoster();
+    } else toast(msg);
   });
 }
 function rtEditName() {
@@ -2930,6 +2959,7 @@ function doShare() {
 loadRoster();
 loadSettings();
 loadProfile();
+customNames[0] = ballName;
 loadLevels();
 uploadLevelStats();
 if (wx.login) {
