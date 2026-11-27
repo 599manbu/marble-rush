@@ -6,6 +6,7 @@ const ctx = sharedCanvas.getContext('2d');
 const DW = 382, DH = 520;          // 设计尺寸（主域按此比例绘制）
 let list = [];
 let selfData = null;
+let page = 0;
 let visible = false;
 let loading = false;
 let failed = '';
@@ -120,29 +121,28 @@ function draw() {
     return;
   }
 
-  const top = 6, rowH = 40;
-  const count = Math.min(list.length, 12);
-  for (let i = 0; i < count; i++) {
-    const u = list[i];
-    const y = top + i * rowH;
-    if (u.isSelf) {
-      ctx.fillStyle = 'rgba(108,208,255,0.14)';
-      ctx.fillRect(0, y, DW, rowH - 4);
-    } else if (i % 2 === 0) {
-      ctx.fillStyle = 'rgba(18,30,56,0.55)';
-      ctx.beginPath();
-      ctx.moveTo(0, y); ctx.lineTo(DW, y); ctx.lineTo(DW, y + rowH - 4); ctx.lineTo(0, y + rowH - 4);
-      ctx.closePath(); ctx.fill();
-    }
-    // 名次
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 14px sans-serif';
-    ctx.fillStyle = i === 0 ? '#ffd54a' : i === 1 ? '#dfe8ff' : i === 2 ? '#ff9d3d' : '#7e97c4';
-    ctx.fillText(String(i + 1), 18, y + 24);
+  const PAGE_SIZE = 5, rowH = 90;
+  const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  page = Math.max(0, Math.min(page, pageCount - 1));
+  const start = page * PAGE_SIZE;
+  const shown = list.slice(start, start + PAGE_SIZE);
+  const RINGS = ['#ffd54a', '#dfe8ff', '#cd8b45'];
 
-    // 头像
+  for (let i = 0; i < shown.length; i++) {
+    const u = shown[i], rank = start + i + 1;
+    const y = 4 + i * rowH;
+    ctx.fillStyle = u.isSelf ? 'rgba(108,208,255,0.14)'
+      : (i % 2 === 0 ? 'rgba(18,30,56,0.55)' : 'rgba(13,23,48,0.35)');
+    ctx.fillRect(2, y, DW - 4, rowH - 8);
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillStyle = rank === 1 ? RINGS[0] : rank === 2 ? RINGS[1] : rank === 3 ? RINGS[2] : '#7e97c4';
+    ctx.fillText(String(rank), 22, y + 50);
+
+    // 头像（前三名带名次框）
     const im = getImg(u.avatar);
-    const ax = 34, ay = y + 7, ar = 12;
+    const ar = 22, ax = 40, ay = y + 18;
     ctx.save();
     ctx.beginPath(); ctx.arc(ax + ar, ay + ar, ar, 0, Math.PI * 2); ctx.closePath();
     ctx.fillStyle = '#24365e'; ctx.fill();
@@ -151,34 +151,39 @@ function draw() {
       ctx.drawImage(im, ax, ay, ar * 2, ar * 2);
     }
     ctx.restore();
+    if (rank <= 3) {
+      ctx.strokeStyle = RINGS[rank - 1]; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(ax + ar, ay + ar, ar + 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = RINGS[rank - 1];
+      ctx.beginPath(); ctx.arc(ax + ar + 18, ay + ar - 18, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#08111f'; ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(rank), ax + ar + 18, ay + ar - 17);
+      ctx.textBaseline = 'alphabetic';
+    }
 
-    // 昵称
     ctx.textAlign = 'left';
-    ctx.font = '13px sans-serif';
+    ctx.font = 'bold 15px sans-serif';
     ctx.fillStyle = u.isSelf ? '#6cd0ff' : '#e8f0ff';
     let nick = u.nick;
     if (nick.length > 8) nick = nick.slice(0, 8) + '…';
-    ctx.fillText(nick, 66, y + 18);
+    ctx.fillText(nick, 96, y + 40);
 
-    // 关卡数与用时
     ctx.font = '11px sans-serif';
     ctx.fillStyle = '#8ea6cf';
-    ctx.fillText('已通关 ' + u.lv + ' 关', 66, y + 32);
+    ctx.fillText('已通关 ' + u.lv + ' 关', 96, y + 62);
+
     ctx.textAlign = 'right';
-    ctx.font = '10px sans-serif';
-    ctx.fillStyle = '#8ea6cf';
-    ctx.fillText('最快', DW - 66, y + 15);
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillStyle = '#6cd0ff';
-    ctx.fillText(fmt(u.time), DW - 10, y + 28);
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = rank <= 3 ? RINGS[rank - 1] : '#6cd0ff';
+    ctx.fillText(fmt(u.time), DW - 12, y + 44);
     ctx.textAlign = 'left';
   }
 
   ctx.textAlign = 'center';
-  ctx.font = '10px sans-serif';
-  ctx.fillStyle = '#5b6c8c';
-  ctx.fillText(list.length > 12 ? '仅显示前 12 名' : '', DW / 2, DH - 4);
-
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = '#8ea6cf';
+  ctx.fillText('第 ' + (page + 1) + ' / ' + pageCount + ' 页', DW / 2, DH - 8);
   ctx.restore();
 }
 
@@ -186,6 +191,7 @@ wx.onMessage(msg => {
   if (!msg) return;
   if (msg.type === 'show') {
     visible = true;
+    page = msg.page || 0;
     if (msg.width && msg.height && (sharedCanvas.width !== msg.width || sharedCanvas.height !== msg.height)) {
       sharedCanvas.width = msg.width;
       sharedCanvas.height = msg.height;
@@ -195,6 +201,9 @@ wx.onMessage(msg => {
     visible = false;
   } else if (msg.type === 'refresh') {
     load();
+  } else if (msg.type === 'page') {
+    page = Math.max(0, +msg.page || 0);
+    draw();
   }
 });
 

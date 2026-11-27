@@ -167,6 +167,10 @@ function drawProfileCard(y) {
     ctx.fillText((profile.name || rtName() || '玩').slice(0, 1), ax + r, ay + r + 1);
   }
   ctx.restore();
+  // 全服前三名：头像框显示在主界面资料卡上
+  if (globalSelf.rank >= 1 && globalSelf.rank <= 3) {
+    drawRankRing(ax + r, ay + r, r, globalSelf.rank);
+  }
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#e8f0ff';
   ctx.fillText(profile.name, ax + r * 2 + 12, y + 32);
@@ -517,6 +521,7 @@ function rtWritePresence() {
     cloudDb.collection('mr_states').doc(id).set({
       data: {
         roomId: rt.roomCode, pid: myPid(), name: rtName(), colorIdx: rt.myColor,
+        avatarUrl: profile.avatarUrl || '',
         x: 0, y: 0, finished: false, finishTime: 0, ts: Date.now(), joined: true,
       },
     }).catch(() => {});
@@ -528,7 +533,10 @@ function rtWatchStates() {
     rt.stateWatcher = cloudDb.collection('mr_states').where({ roomId: rt.roomCode }).watch({
       onChange(snap) {
         const docs = snap.docs || [];
-        rt.players = docs.map(d => ({ pid: d.pid, name: d.name || '玩家', isMe: d.pid === myPid() }));
+        rt.players = docs.map(d => ({
+          pid: d.pid, name: d.name || '玩家', avatarUrl: d.avatarUrl || '',
+          isMe: d.pid === myPid(),
+        }));
         remoteStates = docs.filter(d => d.pid !== myPid());
         if (rt.host && !rt.started && docs.length >= 2) {
           rt.canStart = true;
@@ -570,6 +578,7 @@ function rtPushState() {
     cloudDb.collection('mr_states').doc(id).set({
       data: {
         roomId: rt.roomCode, pid: myPid(), name: rtName(), colorIdx: rt.myColor,
+        avatarUrl: profile.avatarUrl || '',
         x: Math.round(b.x), y: Math.round(b.y),
         finished: b.finished, finishTime: Math.round(b.finishTime * 100) / 100,
         ts: now,
@@ -742,7 +751,22 @@ let pendingRank = false;          // 授权成功后自动进入排行榜
 let rankTab = 'friends';          // friends | global
 let globalRank = [], globalLoading = false, globalErr = '';
 let globalTotal = 0, globalPage = 0, globalSelf = { rank: 0, percent: 0, inTop: false, lv: 0, best: 0 };
-const GLOBAL_LIMIT = 100, GLOBAL_PAGE_SIZE = 12;
+const GLOBAL_LIMIT = 100, GLOBAL_PAGE_SIZE = 5;
+let friendPage = 0;
+const RANK_RINGS = ['#ffd54a', '#dfe8ff', '#cd8b45'];   // 金 / 银 / 铜
+function drawRankRing(cx2, cy2, r, rank) {
+  if (rank < 1 || rank > 3) return;
+  ctx.strokeStyle = RANK_RINGS[rank - 1];
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx2, cy2, r + 3, 0, TAU); ctx.stroke();
+  // 名次小徽标
+  ctx.fillStyle = RANK_RINGS[rank - 1];
+  ctx.beginPath(); ctx.arc(cx2 + r * 0.85, cy2 - r * 0.85, 7, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#08111f'; ctx.font = 'bold 9px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(rank), cx2 + r * 0.85, cy2 - r * 0.85 + 1);
+  ctx.textBaseline = 'alphabetic';
+}
 let simTime = 0, raceTime = 0, countdownT = 0, goT = -99, lastCount = 99;
 let seed = (Math.random() * 1e9) | 0, lenKey = 'medium', diffKey = 'normal';
 let trackLen = LENGTHS.medium.len;
@@ -2247,7 +2271,7 @@ function enterRank() {
     const sc = oc.canvas;
     const w = 764, h = 1040;
     if (sc.width !== w || sc.height !== h) { sc.width = w; sc.height = h; }
-    const post = () => oc.postMessage({ type: 'show', width: w, height: h });
+    const post = () => oc.postMessage({ type: 'show', width: w, height: h, page: friendPage });
     post();
     // 先把自己最新成绩传上去，再让开放数据域重新读取
     uploadLevelStats(() => { post(); setTimeout(() => { try { oc.postMessage({ type: 'refresh' }); } catch (e) {} }, 300); });
@@ -2282,6 +2306,8 @@ function drawRankUI() {
       }
     } catch (e) { /* 忽略 */ }
     if (!drew) textCentered('排行榜需在小游戏真机环境中查看', cx, ry + rh / 2, '12px sans-serif', '#8ea6cf');
+    uiButton(rx + 4, 552, 84, 28, '上一页', false, 'rank-page', -1, { font: 12 });
+    uiButton(rx + rw - 88, 552, 84, 28, '下一页', false, 'rank-page', 1, { font: 12 });
   } else {
     if (globalErr) {
       textCentered(globalErr, cx, ry + rh / 2, '12px sans-serif', '#ff8a8a');
@@ -2293,29 +2319,31 @@ function drawRankUI() {
       globalPage = clamp(globalPage, 0, pageCount - 1);
       const start = globalPage * GLOBAL_PAGE_SIZE;
       const shown = globalRank.slice(start, start + GLOBAL_PAGE_SIZE);
-      const rowH = 35;
+      const rowH = 76;
       for (let i = 0; i < shown.length; i++) {
         const u = shown[i], rank = start + i + 1, y = ry + 6 + i * rowH;
-        if (u.isMe) { ctx.fillStyle = 'rgba(108,208,255,0.14)'; ctx.fillRect(rx + 4, y, rw - 8, rowH - 3); }
-        else if (i % 2 === 0) { ctx.fillStyle = 'rgba(18,30,56,0.55)'; ctx.fillRect(rx + 4, y, rw - 8, rowH - 3); }
-        ctx.textAlign = 'center'; ctx.font = 'bold 13px sans-serif';
-        ctx.fillStyle = rank === 1 ? '#ffd54a' : rank === 2 ? '#dfe8ff' : rank === 3 ? '#ff9d3d' : '#7e97c4';
-        ctx.fillText(String(rank), rx + 20, y + 22);
-        // 头像
+        ctx.fillStyle = u.isMe ? 'rgba(108,208,255,0.14)' : (i % 2 === 0 ? 'rgba(18,30,56,0.55)' : 'rgba(13,23,48,0.35)');
+        ctx.fillRect(rx + 4, y, rw - 8, rowH - 6);
+        ctx.textAlign = 'center'; ctx.font = 'bold 22px sans-serif';
+        ctx.fillStyle = rank === 1 ? '#ffd54a' : rank === 2 ? '#dfe8ff' : rank === 3 ? '#cd8b45' : '#7e97c4';
+        ctx.fillText(String(rank), rx + 24, y + 46);
+        // 头像 + 前三名头像框
         const aim = avatarImg(u.avatarUrl);
-        const ar = 10, ax = rx + 34, ay = y + 7;
+        const ar = 20, ax = rx + 42, ay = y + 16;
         ctx.save();
         ctx.beginPath(); ctx.arc(ax + ar, ay + ar, ar, 0, TAU); ctx.closePath();
         ctx.fillStyle = '#24365e'; ctx.fill();
         if (aim && aim.width > 0) { ctx.clip(); ctx.drawImage(aim, ax, ay, ar * 2, ar * 2); }
         ctx.restore();
-        ctx.textAlign = 'left'; ctx.font = '13px sans-serif';
+        drawRankRing(ax + ar, ay + ar, ar, rank);
+        ctx.textAlign = 'left'; ctx.font = 'bold 15px sans-serif';
         ctx.fillStyle = u.isMe ? '#6cd0ff' : '#e8f0ff';
-        ctx.fillText(u.isMe ? u.name + '（我）' : u.name, rx + 52, y + 16);
-        ctx.font = '10px sans-serif'; ctx.fillStyle = '#8ea6cf';
-        ctx.fillText('已通关 ' + u.lv + ' 关', rx + 52, y + 29);
-        ctx.textAlign = 'right'; ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#6cd0ff';
-        ctx.fillText(u.best ? fmtT(u.best) : '--:--', rx + rw - 12, y + 22);
+        ctx.fillText(u.isMe ? u.name + '（我）' : u.name, rx + 92, y + 38);
+        ctx.font = '11px sans-serif'; ctx.fillStyle = '#8ea6cf';
+        ctx.fillText('已通关 ' + u.lv + ' 关', rx + 92, y + 58);
+        ctx.textAlign = 'right'; ctx.font = 'bold 16px sans-serif';
+        ctx.fillStyle = rank <= 3 ? RANK_RINGS[rank - 1] : '#6cd0ff';
+        ctx.fillText(u.best ? fmtT(u.best) : '--:--', rx + rw - 12, y + 42);
         ctx.textAlign = 'left';
       }
       if (pageCount > 1) {
@@ -2381,9 +2409,18 @@ function drawInviteUI() {
       fillRoundRect(bx0, y, bwAll, 22, 7,
         p && p.isMe ? 'rgba(108,208,255,0.16)' : 'rgba(13,23,48,0.9)',
         p && p.isMe ? '#6cd0ff' : '#24365e', 1);
+      if (p) {
+        const aim = avatarImg(p.avatarUrl);
+        const ar = 8;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(bx0 + 12 + ar, y + 11, ar, 0, TAU); ctx.closePath();
+        ctx.fillStyle = '#24365e'; ctx.fill();
+        if (aim && aim.width > 0) { ctx.clip(); ctx.drawImage(aim, bx0 + 12, y + 3, ar * 2, ar * 2); }
+        ctx.restore();
+      }
       ctx.textAlign = 'left'; ctx.font = '12px sans-serif';
       ctx.fillStyle = p ? (p.isMe ? '#6cd0ff' : '#dfe8ff') : '#4a5b7a';
-      ctx.fillText(p ? (p.name + (p.isMe ? '（我）' : '')) : '等待加入…', bx0 + 10, y + 15);
+      ctx.fillText(p ? (p.name + (p.isMe ? '（我）' : '')) : '等待加入…', bx0 + 40, y + 15);
       if (p && p.isMe) pushHit(bx0, y, bwAll, 22, 'rt-name');
     }
 
@@ -2748,12 +2785,12 @@ function handleUIHit(h, x, y) {
       try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'hide' }); } catch (e) {}
       return true;
     case 'rank-tab':
-      rankTab = h.data; globalPage = 0;
+      rankTab = h.data; globalPage = 0; friendPage = 0;
       if (rankTab === 'global') fetchGlobalRank();
       else {
         try {
           const oc = wx.getOpenDataContext && wx.getOpenDataContext();
-          if (oc) oc.postMessage({ type: 'refresh' });
+          if (oc) oc.postMessage({ type: 'page', page: 0 });
         } catch (e) {}
       }
       return true;
@@ -2761,6 +2798,12 @@ function handleUIHit(h, x, y) {
       if (rankTab === 'global') {
         const pc = Math.max(1, Math.ceil(globalRank.length / GLOBAL_PAGE_SIZE));
         globalPage = clamp(globalPage + (+h.data || 0), 0, pc - 1);
+      } else {
+        friendPage = Math.max(0, friendPage + (+h.data || 0));
+        try {
+          const oc = wx.getOpenDataContext && wx.getOpenDataContext();
+          if (oc) oc.postMessage({ type: 'page', page: friendPage });
+        } catch (e) {}
       }
       return true;
     case 'rank-refresh':
