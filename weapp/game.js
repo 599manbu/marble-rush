@@ -278,6 +278,8 @@ function uploadLevelStats(cb) {
     if (t > 0 && (!fastest || t < fastest)) fastest = t;
   }
   const done = () => { if (cb) cb(); };
+  // 一关都没通关：不上榜
+  if (cleared <= 0) { done(); return; }
   uploadGlobalRank(cleared, fastest);
   try {
     if (wx.setUserCloudStorage) {
@@ -2173,6 +2175,7 @@ function drawLevelsUI() {
 
 /* ---------- 好友排行榜界面 ---------- */
 function uploadGlobalRank(cleared, fastest) {
+  if (cleared <= 0) return;
   if (!initCloud() || !cloudDb) return;
   try {
     cloudDb.collection('mr_ranks').doc(myPid()).set({
@@ -2192,12 +2195,12 @@ function fetchGlobalRank() {
   try {
     const col = cloudDb.collection('mr_ranks');
     const _ = cloudDb.command;
-    col.count().then(c => { globalTotal = c.total || 0; }).catch(() => {});
-    col.orderBy('lv', 'desc').orderBy('best', 'asc').limit(GLOBAL_LIMIT).get().then(res => {
+    col.where({ lv: _.gt(0) }).count().then(c => { globalTotal = c.total || 0; }).catch(() => {});
+    col.where({ lv: _.gt(0) }).orderBy('lv', 'desc').orderBy('best', 'asc').limit(GLOBAL_LIMIT).get().then(res => {
       globalRank = (res.data || []).map(d => ({
         name: d.name || '玩家', avatarUrl: d.avatarUrl || '',
         lv: +d.lv || 0, best: +d.best || 0, isMe: d._id === myPid(),
-      }));
+      })).filter(u => u.lv > 0);
       const idx = globalRank.findIndex(u => u.isMe);
       globalSelf.inTop = idx >= 0;
       if (idx >= 0) {
@@ -2211,11 +2214,13 @@ function fetchGlobalRank() {
           const d = r.data || {};
           const lv = +d.lv || 0, best = +d.best || 0;
           globalSelf.lv = lv; globalSelf.best = best;
+          if (lv <= 0) return null;              // 未通关：不上榜
           return Promise.all([
             col.where({ lv: _.gt(lv) }).count(),
             col.where({ lv: lv, best: _.lt(best || 999999) }).count(),
           ]);
         }).then(arr => {
+          if (!arr) return;
           const rank = (arr[0].total || 0) + (arr[1].total || 0) + 1;
           globalSelf.rank = rank;
           globalSelf.percent = globalTotal ? Math.ceil(rank / globalTotal * 100) : 0;

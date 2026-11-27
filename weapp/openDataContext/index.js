@@ -44,7 +44,8 @@ function load() {
   wx.getFriendCloudStorage({
     keyList,
     success(res) {
-      list = (res.data || []).map(u => parseUser(u, false));
+      // 未通关（0 关）的玩家不显示在排行榜
+      list = (res.data || []).map(u => parseUser(u, false)).filter(u => u.lv > 0);
       done();
     },
     fail(e) {
