@@ -2515,27 +2515,32 @@ let rtEditingName = false;
 function toast(msg) {
   try { wx.showToast({ title: msg, icon: 'none', duration: 1800 }); } catch (e) {}
 }
+// 本地兜底敏感词（云服务异常时使用）
+const LOCAL_BAD = ['傻逼', '操你', '妈的', '色情', '约炮', '赌博', '博彩', '毒品', '冰毒',
+  '代练', '外挂', '加微信', '加qq', '代充', '返利', '刷单', '诈骗'];
+function localNameOk(t) {
+  const s = String(t || '').toLowerCase();
+  return !LOCAL_BAD.some(w => s.indexOf(w) >= 0);
+}
 // 昵称内容安全检测（云函数 msgSecCheck）
 function checkName(text, cb) {
-  if (!initCloud() || !wx.cloud || !wx.cloud.callFunction) {
-    cb(false, '名称校验服务不可用，请稍后重试');
-    return;
-  }
+  const fallback = () => {
+    if (localNameOk(text)) cb(true);
+    else cb(false, '名称包含违规内容');
+  };
+  if (!initCloud() || !wx.cloud || !wx.cloud.callFunction) { fallback(); return; }
   wx.cloud.callFunction({ name: 'msgSecCheck', data: { content: text, scene: 1 } })
     .then(res => {
       const r = (res && res.result) || {};
       if (r.pass) { cb(true); return; }
       if (r.reason === 'risky') { cb(false, '名称包含违规内容'); return; }
       try { console.log('msgSecCheck result', r); } catch (e) {}
-      cb(false, '校验服务异常' + (r.code ? '(' + r.code + ')' : '') + '，请稍后重试');
+      // 服务异常：本地词库兜底，保证正常名字不被拦住
+      fallback();
     })
     .catch(e => {
-      const msg = (e && (e.errMsg || e.message)) || '';
-      if (/FunctionName|not found|-501000|cloud function/i.test(msg)) {
-        cb(false, '请先部署 msgSecCheck 云函数');
-      } else {
-        cb(false, '名称校验失败，请重试');
-      }
+      try { console.log('msgSecCheck call fail', e); } catch (err) {}
+      fallback();
     });
 }
 function handleKeyboard(v) {
