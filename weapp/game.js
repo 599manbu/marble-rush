@@ -453,9 +453,8 @@ function rtStartRace(seedVal, delayMs) {
   mode = 'realtime';
   screen = 'menu';
   startRace(false);
-  // 按房主下发的开赛时间对齐倒计时
-  const delay = clamp((delayMs || 0) / 1000, 0, 5);
-  countdownT = 3 + delay;
+  // 按房主下发的开赛时间对齐倒计时（startAt 即 GO 时刻）
+  countdownT = clamp((delayMs || 3000) / 1000, 0.8, 8);
   state = 'countdown';
   rt.lastPush = 0;
   rtPushState();
@@ -463,7 +462,7 @@ function rtStartRace(seedVal, delayMs) {
 function rtPushState() {
   if (mode !== 'realtime' || !cloudDb || !rt.roomCode) return;
   const now = Date.now();
-  if (now - rt.lastPush < 100) return;
+  if (now - rt.lastPush < 150) return;
   rt.lastPush = now;
   const b = players[0];
   if (!b) return;
@@ -471,7 +470,7 @@ function rtPushState() {
   try {
     cloudDb.collection('mr_states').doc(id).set({
       data: {
-        roomId: rt.roomCode, pid: myPid(), name: customNames[0] || '好友',
+        roomId: rt.roomCode, pid: myPid(), name: rtName(), colorIdx: rt.myColor,
         x: Math.round(b.x), y: Math.round(b.y),
         finished: b.finished, finishTime: Math.round(b.finishTime * 100) / 100,
         ts: now,
@@ -483,8 +482,8 @@ const RT_COLORS = ['#6cd0ff', '#ff9d3d', '#b06cff', '#52e0a0'];
 function rtDrawRemote() {
   if (mode !== 'realtime' || !remoteStates.length) return;
   remoteStates.forEach((st, i) => {
-    if (!st || !st.y) return;
-    const tx = +st.x || W / 2, ty = +st.y || 0;
+    if (!st) return;
+    const tx = +st.x || W / 2, ty = +st.y || 118;
     let d = remoteDraws[st.pid];
     if (!d) { d = remoteDraws[st.pid] = { x: tx, y: ty }; }
     d.x += (tx - d.x) * 0.25;
@@ -505,6 +504,29 @@ function rtDrawRemote() {
 }
 function rtRemoteFinishTimes() {
   return remoteStates.map(s => +s.finishTime).filter(t => t > 0);
+}
+// 结算列表：实时对战把好友也并入
+function resultsList() {
+  if (mode !== 'realtime') return standings();
+  const list = balls.map(b => ({
+    name: b.name, color: b.color, finished: b.finished,
+    finishTime: b.finishTime, falls: b.falls, isPlayer: b.isPlayer,
+  }));
+  remoteStates.forEach(st => {
+    list.push({
+      name: st.name || '玩家',
+      color: RT_COLORS[((+st.colorIdx) || 0) % RT_COLORS.length],
+      finished: !!st.finished, finishTime: +st.finishTime || 0,
+      falls: 0, isPlayer: false,
+    });
+  });
+  list.sort((a, b) => {
+    if (a.finished && b.finished) return a.finishTime - b.finishTime;
+    if (a.finished) return -1;
+    if (b.finished) return 1;
+    return (b.y || 0) - (a.y || 0);
+  });
+  return list;
 }
 function realtimeRankList() {
   const list = balls.map(b => ({
@@ -1260,6 +1282,14 @@ function startRace(newSeed) {
   if (mode === 'realtime' && players[0]) {
     players[0].name = rtName();
     players[0].color = RT_COLORS[rt.myColor % RT_COLORS.length];
+    // 双人/多人分边站位，避免都挤在左边
+    const sides = [0.28, 0.72, 0.42, 0.58];
+    players[0].x = W * sides[rt.myColor % sides.length];
+    remoteDraws = {};
+    remoteStates.forEach(st => {
+      const ci = ((+st.colorIdx) || 0) % sides.length;
+      remoteDraws[st.pid] = { x: W * sides[ci], y: 118 };
+    });
   }
   ghostRecord = mode === 'invite' && players[0] ? [{ x: players[0].x, y: players[0].y }] : [];
   ghostRecT = 0;
@@ -1285,7 +1315,7 @@ function playerFinished(b) {
   if (rank === 1) spawnConfetti(b.x, b.y);
   if (state !== 'finishing') {
     state = 'finishing';
-    finishWaitEnd = raceTime + 8;
+    finishWaitEnd = raceTime + (mode === 'realtime' ? 30 : 8);
     resultsVisible = true;
     resTitleText = '完赛！';
     resNoteText = '其余弹珠仍在冲刺，名次实时更新……';
@@ -1294,7 +1324,7 @@ function playerFinished(b) {
   }
 }
 function renderResults(final) {
-  const st = standings();
+  const st = resultsList();
   if (final) {
     resultsFinal = true; state = 'results';
     const winner = st[0];
@@ -1744,6 +1774,17 @@ function drawMinimap() {
     if (isCam) { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x, my, 7.5, 0, TAU); ctx.fill(); }
     ctx.fillStyle = b.color;
     ctx.beginPath(); ctx.arc(x, my, 5, 0, TAU); ctx.fill();
+  }
+  // 实时对战：小地图上也要显示好友
+  if (mode === 'realtime') {
+    remoteStates.forEach(st => {
+      const yy = +st.y || 0;
+      if (!yy) return;
+      const t = clamp(yy / trackLen, 0, 1);
+      const x = lerp(x0, x1, t);
+      ctx.fillStyle = RT_COLORS[((+st.colorIdx) || 0) % RT_COLORS.length];
+      ctx.beginPath(); ctx.arc(x, my, 5, 0, TAU); ctx.fill();
+    });
   }
 }
 function drawBrand() {
@@ -2334,7 +2375,7 @@ function drawResultsUI() {
   ctx.font = 'bold 26px sans-serif'; ctx.fillStyle = '#e8f0ff'; ctx.textAlign = 'center';
   ctx.fillText(resTitleText, cx, py + 72);
   wrapText(resNoteText, px + 22, py + 98, pw - 44, 18, '12px sans-serif', '#8ea6cf');
-  const st = standings();
+  const st = resultsList();
   const top = py + 150;
   ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#7e97c4'; ctx.textAlign = 'left';
   ctx.fillText('名次', px + 26, top);
@@ -2483,9 +2524,16 @@ function checkName(text, cb) {
   wx.cloud.callFunction({ name: 'msgSecCheck', data: { content: text, scene: 1 } })
     .then(res => {
       const r = (res && res.result) || {};
-      cb(!!r.pass, r.pass ? '' : (r.reason === 'risky' ? '名称包含违规内容' : '名称校验失败，请重试'));
+      cb(!!r.pass, r.pass ? '' : (r.reason === 'risky' ? '名称包含违规内容' : '名称校验未通过，请换一个'));
     })
-    .catch(() => cb(false, '名称校验失败，请重试'));
+    .catch(e => {
+      const msg = (e && (e.errMsg || e.message)) || '';
+      if (/FunctionName|not found|-501000|cloud function/i.test(msg)) {
+        cb(false, '请先部署 msgSecCheck 云函数');
+      } else {
+        cb(false, '名称校验失败，请重试');
+      }
+    });
 }
 function handleKeyboard(v) {
   const t = (v || '').trim();
@@ -2580,11 +2628,11 @@ function handleUIHit(h, x, y) {
       return true;
     case 'rt-start':
       if (rt.host && rt.canStart && cloudDb && rt.docId) {
-        const startAt = Date.now() + 3000;
+        const startAt = Date.now() + 4000;
         try {
           cloudDb.collection('mr_rooms').doc(rt.docId).update({ data: { status: 'racing', startAt } }).catch(() => {});
         } catch (e) {}
-        rtStartRace(rt.seed, 3000);
+        rtStartRace(rt.seed, 4000);
       }
       return true;
     case 'open-rank': rankFrom = screen; enterRank(); return true;

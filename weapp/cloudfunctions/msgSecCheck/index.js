@@ -16,7 +16,8 @@ exports.main = async (event) => {
       content,
     });
     const suggest = res && res.result && res.result.suggest;
-    return { pass: suggest === 'pass', suggest, label: res && res.result && res.result.label };
+    // pass / review 放行，只有明确 risky 才拦截
+    return { pass: suggest !== 'risky', suggest, label: res && res.result && res.result.label };
   } catch (e) {
     // 87014：内容含有违法违规内容
     if (e && e.errCode === 87014) return { pass: false, reason: 'risky' };
