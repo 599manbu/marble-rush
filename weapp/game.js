@@ -2524,7 +2524,10 @@ function checkName(text, cb) {
   wx.cloud.callFunction({ name: 'msgSecCheck', data: { content: text, scene: 1 } })
     .then(res => {
       const r = (res && res.result) || {};
-      cb(!!r.pass, r.pass ? '' : (r.reason === 'risky' ? '名称包含违规内容' : '名称校验未通过，请换一个'));
+      if (r.pass) { cb(true); return; }
+      if (r.reason === 'risky') { cb(false, '名称包含违规内容'); return; }
+      try { console.log('msgSecCheck result', r); } catch (e) {}
+      cb(false, '校验服务异常' + (r.code ? '(' + r.code + ')' : '') + '，请稍后重试');
     })
     .catch(e => {
       const msg = (e && (e.errMsg || e.message)) || '';
