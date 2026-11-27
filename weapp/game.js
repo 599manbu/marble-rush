@@ -124,11 +124,16 @@ function authProfile() {
     if (u.avatarUrl) profile.avatarUrl = u.avatarUrl;
     profile.auth = true;
     saveProfile();
-    if (pendingRank) {
-      pendingRank = false;
-      rankFrom = 'menu';
-      enterRank();
-    }
+    // 授权后立即把当前最快成绩/关卡上传到排行榜
+    uploadLevelStats(() => {
+      if (screen === 'rank') {
+        fetchGlobalRank();
+        try {
+          const oc = wx.getOpenDataContext && wx.getOpenDataContext();
+          if (oc) { oc.postMessage({ type: 'refresh' }); setTimeout(() => { try { oc.postMessage({ type: 'refresh' }); } catch (e) {} }, 300); }
+        } catch (e) {}
+      }
+    });
     // 小球名字默认跟随微信名；排行榜名字也同步为微信名
     ballName = profile.name;
     customNames[0] = ballName;
@@ -263,6 +268,8 @@ function loadLevels() {
 function saveLevels() { store.set('marbleLevels', levelProgress); }
 // 把关卡进度上传到微信托管数据（好友排行榜用）
 function uploadLevelStats(cb) {
+  // 未授权微信资料：只保存在本机，不上榜
+  if (!profile.auth) { if (cb) cb(); return; }
   const keys = Object.keys(levelProgress.best);
   const cleared = keys.length;
   let fastest = 0;
@@ -1451,6 +1458,7 @@ function renderResults(final) {
         resTitleText = '挑战失败';
         resNoteText = '第 ' + currentLevel + ' 关需要进入前三名才能解锁下一关，再试一次吧！';
       }
+      if (!profile.auth) resNoteText += ' 授权微信后可上榜。';
     } else if (mode === 'realtime') {
       const p = players[0];
       const t = p.finished ? p.finishTime : 0;
@@ -2244,8 +2252,12 @@ function drawRankUI() {
 
   uiButton(cx - 160, 44, 155, 34, '好友排行榜', rankTab === 'friends', 'rank-tab', 'friends', { font: 13 });
   uiButton(cx + 5, 44, 155, 34, '全服排行榜', rankTab === 'global', 'rank-tab', 'global', { font: 13 });
-  textCentered(rankTab === 'global' ? '全服前 100 名 · 按通关数与最快用时排序' : '好友 · 按通关数与最快用时排序',
-    cx, 100, '11px sans-serif', '#8ea6cf');
+  if (!profile.auth) {
+    uiButton(cx - 165, 88, 330, 26, '未授权 · 点击授权并上传成绩', true, 'rank-auth', null, { font: 12 });
+  } else {
+    textCentered(rankTab === 'global' ? '全服前 100 名 · 按通关数与最快用时排序' : '好友 · 按通关数与最快用时排序',
+      cx, 100, '11px sans-serif', '#8ea6cf');
+  }
 
   const rx = 24, ry = 116, rw = 382, rh = 430;
   fillRoundRect(rx, ry, rw, rh, 12, 'rgba(8,14,28,0.6)', '#24365e', 1);
@@ -2719,17 +2731,8 @@ function handleUIHit(h, x, y) {
         rtStartRace(rt.seed, 4000);
       }
       return true;
-    case 'open-rank':
-      if (!profile.auth) {
-        toast('请先授权微信头像和昵称');
-        pendingRank = true;
-        rankFrom = screen;
-        authProfile();
-        return true;
-      }
-      rankFrom = screen;
-      enterRank();
-      return true;
+    case 'open-rank': rankFrom = screen; enterRank(); return true;
+    case 'rank-auth': authProfile(); return true;
     case 'rank-back':
       screen = rankFrom === 'levels' ? 'levels' : 'menu';
       try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'hide' }); } catch (e) {}
