@@ -82,6 +82,78 @@ function sndFinish(win) {
 /* ================= 设置（本地保存） ================= */
 let settings = { ctrl: 'btn', vol: 0.45, mute: false };
 let settingsOpen = false;
+
+/* ================= 玩家资料（头像 / 昵称） ================= */
+let profile = { name: '', avatarUrl: '' };
+const avatarCache = {};
+function loadProfile() {
+  const p = store.get('mrProfile', null);
+  if (p && typeof p === 'object') {
+    profile.name = p.name || '';
+    profile.avatarUrl = p.avatarUrl || '';
+  }
+}
+function saveProfile() { store.set('mrProfile', profile); }
+function avatarImg(url) {
+  if (!url) return null;
+  let im = avatarCache[url];
+  if (!im) {
+    try {
+      im = wx.createImage();
+      im.src = url;
+      avatarCache[url] = im;
+    } catch (e) { return null; }
+  }
+  return im;
+}
+function authProfile() {
+  const apply = (u) => {
+    if (!u) return;
+    profile.name = u.nickName || profile.name;
+    profile.avatarUrl = u.avatarUrl || profile.avatarUrl;
+    saveProfile();
+    if (profile.name) store.set('mrName', profile.name.slice(0, 6));
+    toast('已获取微信头像和昵称');
+  };
+  try {
+    if (wx.getUserProfile) {
+      wx.getUserProfile({ desc: '用于展示头像与昵称', success: r => apply(r.userInfo), fail: () => toast('未授权，仍可使用默认昵称') });
+      return;
+    }
+    if (wx.getUserInfo) {
+      wx.getUserInfo({ success: r => apply(r.userInfo), fail: () => toast('未授权，仍可使用默认昵称') });
+      return;
+    }
+  } catch (e) {}
+  toast('当前环境不支持获取微信资料');
+}
+function drawProfileCard(y) {
+  const px = 30, pw = UI_W - 60, h = 74;
+  fillRoundRect(px, y, pw, h, 12, 'rgba(13,23,48,0.92)', '#24365e', 1);
+  const im = avatarImg(profile.avatarUrl);
+  const ax = px + 12, ay = y + 11, r = 26;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(ax + r, ay + r, r, 0, TAU); ctx.closePath();
+  ctx.fillStyle = '#24365e'; ctx.fill();
+  if (im && im.width > 0) { ctx.clip(); ctx.drawImage(im, ax, ay, r * 2, r * 2); }
+  else {
+    ctx.fillStyle = '#1c3a6e'; ctx.fill();
+    ctx.fillStyle = '#9fb6df'; ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText((profile.name || rtName() || '玩').slice(0, 1), ax + r, ay + r + 1);
+  }
+  ctx.restore();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#e8f0ff';
+  ctx.fillText(profile.name || rtName(), ax + r * 2 + 12, y + 32);
+  const soloBest = +store.get('mrSoloBest', 0) || 0;
+  ctx.font = '11px sans-serif'; ctx.fillStyle = '#8ea6cf';
+  ctx.fillText('单人历史最快：' + (soloBest ? fmtT(soloBest) : '--:--.-'), ax + r * 2 + 12, y + 52);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#6cd0ff'; ctx.font = '11px sans-serif';
+  ctx.fillText(profile.avatarUrl ? '点击刷新' : '点击授权微信头像', px + pw - 12, y + 52);
+  ctx.textAlign = 'left';
+  pushHit(px, y, pw, h, 'profile-auth');
+}
 function loadSettings() {
   const s = store.get('marbleSettings', null);
   if (s && typeof s === 'object') {
@@ -283,6 +355,7 @@ let rt = {
 let rtPendingRoom = '';
 function rtName() {
   let n = store.get('mrName', '');
+  if (!n) n = profile.name || '';
   if (!n) n = '玩家' + (1000 + Math.floor(Math.random() * 9000));
   return n;
 }
@@ -636,6 +709,7 @@ function drawGhostBall() {
   ctx.restore();
 }
 let rankFrom = 'menu';
+let setupMode = 'solo';           // 分步设置来自哪个模式
 let rankTab = 'friends';          // friends | global
 let globalRank = [], globalLoading = false, globalErr = '';
 let globalTotal = 0, globalPage = 0, globalSelf = { rank: 0, percent: 0, inTop: false, lv: 0, best: 0 };
@@ -1392,6 +1466,10 @@ function renderResults(final) {
       const prev = store.get(bestKey(), 0);
       const p = players[0];
       if (p.finished && (!prev || p.finishTime < +prev)) store.set(bestKey(), p.finishTime);
+      if (p.finished) {
+        const soloPrev = +store.get('mrSoloBest', 0) || 0;
+        if (!soloPrev || p.finishTime < soloPrev) store.set('mrSoloBest', p.finishTime);
+      }
     }
     resultsVisible = true;
   }
@@ -1897,7 +1975,6 @@ function drawMenuUI() {
   fillRoundRect(px, py, pw, ph, 18, 'rgba(10,17,34,0.92)', '#2b3f6b', 1);
   const cx = UI_W / 2;
 
-  // 标题
   const tg = ctx.createLinearGradient(cx - 120, 0, cx + 120, 0);
   tg.addColorStop(0, '#ffd54a'); tg.addColorStop(0.45, '#ff8a5c'); tg.addColorStop(1, '#6cd0ff');
   ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = tg;
@@ -1905,107 +1982,60 @@ function drawMenuUI() {
   ctx.fillText('赛球弹珠竞速', cx, 92);
   textCentered('MARBLE RUSH · 弹珠障碍追逐赛', cx, 118, '11px sans-serif', '#8ea6cf');
 
-  // 简介
-  wrapText('上帝视角弹珠竞速：冲下超长滑坡赛道，闪避风车、活塞、漏斗与黑洞，撞开对手抢线；赛道长度与 AI 难度自由组合。',
-    px + 18, 146, pw - 36, 18, '12px sans-serif', '#c3d3ef');
-
   const bx0 = px + 16, bwAll = pw - 32;
-  // 模式
-  textCentered('模 式', cx, 212, '11px sans-serif', '#7e97c4');
+  textCentered('模 式', cx, 166, '11px sans-serif', '#7e97c4');
   const modes = [['solo', '单人'], ['level', '关卡'], ['invite', '邀请'], ['spectate', '观赛']];
   const mw = (bwAll - 18) / 4;
-  modes.forEach((m, i) => uiButton(bx0 + i * (mw + 6), 222, mw, 34, m[1], mode === m[0], 'mode', m[0], { font: 14 }));
+  modes.forEach((m, i) => uiButton(bx0 + i * (mw + 6), 178, mw, 34, m[1], mode === m[0], 'mode', m[0], { font: 14 }));
 
   if (mode === 'level') {
     const cleared = Object.keys(levelProgress.best).length;
-    textCentered('关卡模式 · 难度从噩梦起步，逐关递增', cx, 286, '11px sans-serif', '#7e97c4');
+    textCentered('难度从噩梦起步，逐关递增', cx, 246, '12px sans-serif', '#8ea6cf');
     textCentered('已解锁第 ' + levelProgress.unlocked + ' 关 · 已通关 ' + cleared + ' / ' + MAX_LEVEL,
-      cx, 310, '12px sans-serif', '#ffe9a8');
-    uiButton(cx - 120, 326, 240, 34, '选择关卡（第 ' + currentLevel + ' 关）', true, 'open-levels', null, { font: 13 });
+      cx, 270, '13px sans-serif', '#ffe9a8');
   } else if (mode === 'invite') {
-    textCentered('对战方式、赛道长度、难度与球数', cx, 300, '12px sans-serif', '#8ea6cf');
-    textCentered('都在「邀请好友」页里设置', cx, 324, '12px sans-serif', '#8ea6cf');
-  } else if (mode === 'solo') {
-    textCentered('赛道长度、AI 难度、AI 数量', cx, 288, '12px sans-serif', '#8ea6cf');
-    textCentered('点「开始设置」后分三步选择', cx, 310, '12px sans-serif', '#8ea6cf');
+    textCentered('幽灵对战 / 实时对战', cx, 246, '12px sans-serif', '#8ea6cf');
+    textCentered('赛道与参数在邀请页里设置', cx, 268, '12px sans-serif', '#8ea6cf');
   } else {
-    // 赛道长度
-    textCentered('赛道长度', cx, 282, '11px sans-serif', '#7e97c4');
-    const lens = [['short', '短 ≈40秒'], ['medium', '中 ≈1分30'], ['long', '长 ≈2分钟'], ['xl', '超长 ≈3分钟']];
-    const lw = (bwAll - 18) / 4;
-    lens.forEach((l, i) => uiButton(bx0 + i * (lw + 6), 292, lw, 32, l[1], lenKey === l[0], 'len', l[0], { font: 12 }));
-
-    // AI 难度
-    textCentered('AI 难度（人机强度 · 机关密度）', cx, 346, '11px sans-serif', '#7e97c4');
-    const ais = [['easy', '简单'], ['normal', '普通'], ['hard', '困难'], ['nightmare', '噩梦']];
-    const aw = (bwAll - 18) / 4;
-    ais.forEach((a, i) => uiButton(bx0 + i * (aw + 6), 356, aw, 32, a[1], diffKey === a[0], 'ai', a[0], { font: 12 }));
+    textCentered('点「开始设置」后分三步选择', cx, 246, '12px sans-serif', '#8ea6cf');
+    textCentered('赛道长度 → AI 难度 → AI 数量', cx, 268, '12px sans-serif', '#8ea6cf');
   }
 
-  // 小球数量
-  if (mode === 'level') {
-    textCentered('小球数量', cx, 410, '11px sans-serif', '#7e97c4');
-    textCentered('关卡模式固定 6 颗球', cx, 438, '13px sans-serif', '#ffe9a8');
-  } else if (mode === 'invite' || mode === 'solo') {
-    // 邀请模式在邀请页设置；单人模式在分步向导里设置
-  } else {
-    textCentered('小球数量（1-10，颜色各不相同）', cx, 410, '11px sans-serif', '#7e97c4');
-    const step = bwAll / 10;
-    for (let i = 1; i <= 10; i++) {
-      const ccx = bx0 + step * (i - 0.5), ccy = 434;
-      const on = ballCount === i;
-      ctx.beginPath(); ctx.arc(ccx, ccy, 15, 0, TAU);
-      ctx.fillStyle = on ? 'rgba(28,58,110,0.95)' : 'rgba(13,23,48,0.95)';
-      ctx.fill();
-      ctx.strokeStyle = on ? '#6cd0ff' : '#33508a'; ctx.lineWidth = on ? 2 : 1; ctx.stroke();
-      ctx.font = '13px sans-serif'; ctx.fillStyle = on ? '#fff' : '#9fb6df';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(i), ccx, ccy + 1);
-      ctx.textBaseline = 'alphabetic';
-      pushHit(ccx - 17, ccy - 17, 34, 34, 'count', i);
+  if (mode !== 'invite') {
+    const big = true;
+    const labelY = 306;
+    const rowH = 42, rowGap = 48, nameFont = 15, cols = 4;
+    textCentered('选手命名（点击方框改名）', cx, labelY, '12px sans-serif', '#7e97c4');
+    const cellW = (bwAll - (cols - 1) * 6) / cols;
+    const shownCount = mode === 'level' ? LEVEL_BALLS : ballCount;
+    for (let i = 0; i < 10; i++) {
+      const r = Math.floor(i / cols), c = i % cols;
+      const nx = bx0 + c * (cellW + 6), ny = labelY + 10 + r * rowGap;
+      const on = i < shownCount;
+      fillRoundRect(nx, ny, cellW, rowH, 8, '#0d1730', '#24365e', 1);
+      ctx.globalAlpha = on ? 1 : 0.32;
+      ctx.fillStyle = BALL_POOL[i].color;
+      ctx.beginPath(); ctx.arc(nx + 12, ny + rowH / 2, 6, 0, TAU); ctx.fill();
+      ctx.font = nameFont + 'px sans-serif'; ctx.fillStyle = '#e8f0ff';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(customNames[i], nx + 23, ny + rowH / 2 + 1);
+      ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+      pushHit(nx, ny, cellW, rowH, 'name', i);
     }
   }
 
-  // 选手命名（邀请模式在邀请页里设置，主菜单不显示）
-  if (mode !== 'invite') {
-  const big = mode === 'solo';
-  const labelY = big ? 316 : 470;
-  const rowH = big ? 42 : 30;
-  const rowGap = big ? 48 : 36;
-  const nameFont = big ? 15 : 11;
-  const cols = big ? 4 : 5;
-  textCentered('选手命名（点击方框改名）', cx, labelY, big ? '12px sans-serif' : '11px sans-serif', '#7e97c4');
-  const cellW = (bwAll - (cols - 1) * 6) / cols;
-  const shownCount = mode === 'level' ? LEVEL_BALLS : ballCount;
-  for (let i = 0; i < 10; i++) {
-    const r = Math.floor(i / cols), c = i % cols;
-    const nx = bx0 + c * (cellW + 6), ny = labelY + 10 + r * rowGap;
-    const on = i < shownCount;
-    fillRoundRect(nx, ny, cellW, rowH, 8, '#0d1730', '#24365e', 1);
-    ctx.globalAlpha = on ? 1 : 0.32;
-    ctx.fillStyle = BALL_POOL[i].color;
-    ctx.beginPath(); ctx.arc(nx + (big ? 12 : 11), ny + rowH / 2, big ? 6 : 5, 0, TAU); ctx.fill();
-    ctx.font = nameFont + 'px sans-serif'; ctx.fillStyle = '#e8f0ff';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillText(customNames[i], nx + (big ? 23 : 21), ny + rowH / 2 + 1);
-    ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
-    pushHit(nx, ny, cellW, rowH, 'name', i);
-  }
-  }
-
-  // 开始 / 设置
   const sbw = Math.min(260, bwAll - 40);
   const sbx = cx - sbw / 2;
-  const sby = mode === 'invite' ? 392 : mode === 'solo' ? 500 : 560;
+  const sby = mode === 'invite' ? 400 : 500;
   const sg = ctx.createLinearGradient(sbx, sby, sbx + sbw, sby + 52);
   sg.addColorStop(0, '#ffd54a'); sg.addColorStop(1, '#ffb14a');
   fillRoundRect(sbx, sby, sbw, 52, 12, sg);
   ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#08111f';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(mode === 'level' ? '选择关卡 ▶' : mode === 'invite' ? '邀请好友 ▶' : mode === 'solo' ? '开始设置 ▶' : '开始比赛 ▶', cx, sby + 27);
+  ctx.fillText(mode === 'level' ? '选择关卡 ▶' : mode === 'invite' ? '邀请好友 ▶' : '开始设置 ▶', cx, sby + 27);
   ctx.textBaseline = 'alphabetic';
   pushHit(sbx, sby, sbw, 52,
-    mode === 'level' ? 'open-levels' : mode === 'invite' ? 'open-invite' : mode === 'solo' ? 'setup-open' : 'start');
+    mode === 'level' ? 'open-levels' : mode === 'invite' ? 'open-invite' : 'setup-open');
 
   const lbw = 118, lby = sby + 68;
   uiButton(cx - 185, lby, lbw, 34, '设置', false, 'open-settings', null, { font: 13 });
@@ -2013,11 +2043,10 @@ function drawMenuUI() {
   uiButton(cx + 67, lby, lbw, 34, '分享好友', false, 'share', null, { font: 13 });
 
   textCentered(bestText(), cx, sby + 126, '12px sans-serif', '#7e97c4');
-  textCentered(mode === 'invite' ? '邀请页可选择幽灵对战或实时对战' : '关卡模式共 50 关，难度从噩梦起步逐关提升',
-    cx, sby + 156, '11px sans-serif', '#66809f');
-  textCentered('默认左右按钮操作 · 邀请好友同赛道比用时', cx, sby + 176, '11px sans-serif', '#66809f');
+  drawProfileCard(660);
   endUILayer();
 }
+
 /* ---------- 单人模式分步设置 ---------- */
 function drawSetupUI() {
   ctx.fillStyle = 'rgba(4,8,18,0.78)'; ctx.fillRect(0, 0, cw, ch);
@@ -2112,7 +2141,8 @@ function uploadGlobalRank(cleared, fastest) {
   try {
     cloudDb.collection('mr_ranks').doc(myPid()).set({
       data: {
-        name: rtName(),
+        name: profile.name || rtName(),
+        avatarUrl: profile.avatarUrl || '',
         lv: cleared,
         best: Math.round((fastest || 0) * 100) / 100,
         updatedAt: Date.now(),
@@ -2129,7 +2159,8 @@ function fetchGlobalRank() {
     col.count().then(c => { globalTotal = c.total || 0; }).catch(() => {});
     col.orderBy('lv', 'desc').orderBy('best', 'asc').limit(GLOBAL_LIMIT).get().then(res => {
       globalRank = (res.data || []).map(d => ({
-        name: d.name || '玩家', lv: +d.lv || 0, best: +d.best || 0, isMe: d._id === myPid(),
+        name: d.name || '玩家', avatarUrl: d.avatarUrl || '',
+        lv: +d.lv || 0, best: +d.best || 0, isMe: d._id === myPid(),
       }));
       const idx = globalRank.findIndex(u => u.isMe);
       globalSelf.inTop = idx >= 0;
@@ -2220,11 +2251,19 @@ function drawRankUI() {
         ctx.textAlign = 'center'; ctx.font = 'bold 13px sans-serif';
         ctx.fillStyle = rank === 1 ? '#ffd54a' : rank === 2 ? '#dfe8ff' : rank === 3 ? '#ff9d3d' : '#7e97c4';
         ctx.fillText(String(rank), rx + 20, y + 22);
+        // 头像
+        const aim = avatarImg(u.avatarUrl);
+        const ar = 10, ax = rx + 34, ay = y + 7;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(ax + ar, ay + ar, ar, 0, TAU); ctx.closePath();
+        ctx.fillStyle = '#24365e'; ctx.fill();
+        if (aim && aim.width > 0) { ctx.clip(); ctx.drawImage(aim, ax, ay, ar * 2, ar * 2); }
+        ctx.restore();
         ctx.textAlign = 'left'; ctx.font = '13px sans-serif';
         ctx.fillStyle = u.isMe ? '#6cd0ff' : '#e8f0ff';
-        ctx.fillText(u.isMe ? u.name + '（我）' : u.name, rx + 40, y + 16);
+        ctx.fillText(u.isMe ? u.name + '（我）' : u.name, rx + 52, y + 16);
         ctx.font = '10px sans-serif'; ctx.fillStyle = '#8ea6cf';
-        ctx.fillText('已通关 ' + u.lv + ' 关', rx + 40, y + 29);
+        ctx.fillText('已通关 ' + u.lv + ' 关', rx + 52, y + 29);
         ctx.textAlign = 'right'; ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#6cd0ff';
         ctx.fillText(u.best ? fmtT(u.best) : '--:--', rx + rw - 12, y + 22);
         ctx.textAlign = 'left';
@@ -2582,15 +2621,17 @@ function handleUIHit(h, x, y) {
     case 'count': ballCount = h.data; saveRoster(); return true;
     case 'name': editName(h.data); return true;
     case 'start': if (mode === 'invite') startInviteRace(); else startRace(false); return true;
-    case 'setup-open': screen = 'setup1'; return true;
+    case 'setup-open': setupMode = mode; screen = 'setup1'; return true;
     case 'setup-len': lenKey = h.data; screen = 'setup2'; return true;
     case 'setup-ai': diffKey = h.data; screen = 'setup3'; return true;
     case 'setup-count':
       ballCount = clamp((+h.data || 0) + 1, 1, 10);
       saveRoster();
+      mode = setupMode;
       screen = 'menu';
       startRace(false);
       return true;
+    case 'profile-auth': authProfile(); return true;
     case 'setup-back':
       screen = screen === 'setup1' ? 'menu' : screen === 'setup2' ? 'setup1' : 'setup2';
       return true;
@@ -2888,6 +2929,7 @@ function doShare() {
 /* ================= 启动 ================= */
 loadRoster();
 loadSettings();
+loadProfile();
 loadLevels();
 uploadLevelStats();
 if (wx.login) {
