@@ -124,6 +124,11 @@ function authProfile() {
     if (u.avatarUrl) profile.avatarUrl = u.avatarUrl;
     profile.auth = true;
     saveProfile();
+    if (pendingRank) {
+      pendingRank = false;
+      rankFrom = 'menu';
+      enterRank();
+    }
     // 小球名字默认跟随微信名；排行榜名字也同步为微信名
     ballName = profile.name;
     customNames[0] = ballName;
@@ -721,6 +726,7 @@ function drawGhostBall() {
 }
 let rankFrom = 'menu';
 let setupMode = 'solo';           // 分步设置来自哪个模式
+let pendingRank = false;          // 授权成功后自动进入排行榜
 let rankTab = 'friends';          // friends | global
 let globalRank = [], globalLoading = false, globalErr = '';
 let globalTotal = 0, globalPage = 0, globalSelf = { rank: 0, percent: 0, inTop: false, lv: 0, best: 0 };
@@ -2713,7 +2719,17 @@ function handleUIHit(h, x, y) {
         rtStartRace(rt.seed, 4000);
       }
       return true;
-    case 'open-rank': rankFrom = screen; enterRank(); return true;
+    case 'open-rank':
+      if (!profile.auth) {
+        toast('请先授权微信头像和昵称');
+        pendingRank = true;
+        rankFrom = screen;
+        authProfile();
+        return true;
+      }
+      rankFrom = screen;
+      enterRank();
+      return true;
     case 'rank-back':
       screen = rankFrom === 'levels' ? 'levels' : 'menu';
       try { const oc = wx.getOpenDataContext && wx.getOpenDataContext(); if (oc) oc.postMessage({ type: 'hide' }); } catch (e) {}
